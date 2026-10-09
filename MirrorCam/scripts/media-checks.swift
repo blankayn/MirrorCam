@@ -3,7 +3,7 @@
 import AppKit
 import Photos
 import ImageIO
-import MobileCoreServices
+import CoreServices
 
 func check(_ condition: @autoclosure () -> Bool, _ message: String) {
     guard condition() else { fatalError(message) }
