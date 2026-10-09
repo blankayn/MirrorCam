@@ -161,7 +161,9 @@ func hdrFixture(bias: Float, orientation: Int = 1, width: Int = 320, height: Int
             let sourceX = max(0, min(width - 1, x - shift))
             let band = min(3, sourceX * 4 / width)
             let base = [0.008, 0.12, 1.8, 3.0][band]
-            let texture = (sourceX / 13 + y / 11) % 2 == 0 ? 1.0 : 0.92
+            // Asymmetric detail avoids the many equivalent shifts of a periodic checkerboard.
+            let hash = ((sourceX / 13 * 73856093) ^ (y / 11 * 19349663)) & 255
+            let texture = 0.76 + 0.24 * Double(hash) / 255
             let value = UInt8(pow(min(1, base * texture * exposure), 1 / 2.2) * 255)
             let index = (y * width + x) * 4
             pixels[index] = value; pixels[index + 1] = value; pixels[index + 2] = value; pixels[index + 3] = 255

@@ -115,7 +115,9 @@ enum HDRProcessor {
         var transform = result.alignmentTransform
         transform.tx /= scale; transform.ty /= scale
         guard abs(transform.tx) <= CGFloat(image.width) * 0.04,
-              abs(transform.ty) <= CGFloat(image.height) * 0.04 else { throw CameraError.message("Too much camera movement for HDR.") }
+              abs(transform.ty) <= CGFloat(image.height) * 0.04 else {
+            throw CameraError.message("Too much camera movement for HDR (translation \(transform.tx), \(transform.ty); exposure ratio \(ratio)).")
+        }
         // Keep the center exposure's full frame. Extend only the few edge pixels needed by translation.
         return CIImage(cgImage: image).clampedToExtent().transformed(by: transform)
             .cropped(to: CGRect(x: 0, y: 0, width: reference.width, height: reference.height))
