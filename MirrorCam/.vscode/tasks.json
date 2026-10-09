@@ -1,0 +1,7 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {"label":"MirrorCam: validate project structure","type":"shell","command":"python","args":["scripts/validate-project.py"],"problemMatcher":[],"group":{"kind":"test","isDefault":true}},
+    {"label":"MirrorCam: build IPA on macOS","type":"shell","command":"bash","args":["scripts/build-ipa.sh","sideload"],"problemMatcher":[],"presentation":{"reveal":"always"}}
+  ]
+}

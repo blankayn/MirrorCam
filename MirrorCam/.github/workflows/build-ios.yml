@@ -1,0 +1,72 @@
+name: Build MirrorCam IPA
+
+"on":
+  push:
+    branches: [main]
+    paths:
+      - 'MirrorCam/**'
+      - 'MirrorCam.xcodeproj/**'
+      - 'scripts/**'
+      - '.github/workflows/build-ios.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_15.4.app/Contents/Developer
+    steps:
+      - name: Download source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Locate project and verify Xcode
+        shell: bash
+        run: |
+          if [[ -d MirrorCam.xcodeproj ]]; then
+            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
+          elif [[ -d MirrorCam/MirrorCam.xcodeproj ]]; then
+            echo "PROJECT_DIR=MirrorCam" >> "$GITHUB_ENV"
+          else
+            echo "::error::MirrorCam.xcodeproj is missing. Upload the extracted project files."
+            exit 1
+          fi
+          if [[ ! -d "$DEVELOPER_DIR" ]]; then
+            echo "::error::Xcode 15.4 is unavailable. This iOS 12 build needs a compatible cloud Mac."
+            exit 1
+          fi
+          xcodebuild -version
+
+      - name: Validate project structure
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: python3 scripts/validate-project.py
+
+      - name: Build unsigned arm64 IPA
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build
+          bash scripts/build-ipa.sh sideload 2>&1 | tee build/xcodebuild.log
+
+      - name: Upload IPA for Sideloadly
+        uses: actions/upload-artifact@v4
+        with:
+          name: MirrorCam-unsigned-ipa
+          path: ${{ env.PROJECT_DIR }}/build/MirrorCam-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MirrorCam-build-log
+          path: ${{ env.PROJECT_DIR }}/build/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
