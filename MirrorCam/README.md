@@ -2,7 +2,7 @@
 
 A native Swift / UIKit camera project for **iPhone 6, iOS 12.0 or later**. Uses AVFoundation, PhotoKit and AVKit; no SwiftUI, package manager, network service, or third-party runtime dependency.
 
-**Build status:** Version 1.2 adds the opt-in Iris12 experiment; its build and device tests are pending. [Version 1.1 compiled successfully with Xcode 15.4](https://github.com/blankayn/MirrorCam/actions/runs/37899096832) for arm64 / iOS 12.0 and passed 172 synthetic media assertions. Version 1.0 was installed and launched by the user. Native capture, camera framing, audio and Photos saving/playback still need checks on the iPhone 6. See `docs/VALIDATION.md`.
+**Build status:** [Version 1.2 compiled successfully with Xcode 15.4](https://github.com/blankayn/MirrorCam/actions/runs/37902485260) for arm64 / iOS 12.0 and passed all 172 software media assertions. [Download the unsigned IPA artifact](https://github.com/blankayn/MirrorCam/actions/runs/37902485260/artifacts/11602204135) and extract its ZIP; it expires on 16 October 2026. Version 1.0 was installed and launched by the user. The new Iris12 native experiment, camera framing, audio and Photos saving/playback still need checks on the iPhone 6. See `docs/VALIDATION.md`.
 
 ## What is implemented
 

@@ -23,8 +23,10 @@ The [GitHub Actions run 37889696067](https://github.com/blankayn/MirrorCam/actio
 
 The user confirmed version 1.0 installs and launches on the iPhone. No simulator test or physical-device test of version 1.1 was performed. Synthetic PhotoKit recognition on macOS does not establish iOS 12 Photos-library import, touch-and-hold playback, actual camera field of view, microphone sync or device performance. Run `DEVICE-TESTS.md` on the iPhone 6 after installation.
 
-## Version 1.2 (pending build)
+## Version 1.2
 
 - Local validation: **118 structural/syntax checks passed across ten Swift files**. This includes Objective-C source membership and bridging-header references; Objective-C compilation is not validated on Windows.
 - Iris12 0.0.2 was statically analyzed from the author's repository without executing its code. Package hash, filter, arm64 code and observed hook targets are recorded in `IRIS12-ANALYSIS.md`.
 - Native Live Photo delegates, session reconfiguration, error cleanup and bridging were reviewed. No native-hook execution, simulator execution or physical iPhone test has been performed. The existing synthetic media tests exercise the software path, not the Iris12 hook or native camera pipeline.
+- [Cloud run 37902485260](https://github.com/blankayn/MirrorCam/actions/runs/37902485260) at commit `fa9c41449822ead203973c8d5f8af684ec064f67`: Xcode 15.4 Release iphoneos build succeeded, including Objective-C runtime hooks and Swift bridging. Cloud structural validation passed 108 checks; all **172 software media assertions passed**. The local parser adds ten Swift syntax checks.
+- Downloaded IPA: version 1.2 (build 3), arm64, minimum OS 12.0 in both Info.plist and Mach-O, embedded Swift libraries present, archive integrity verified. Artifact ZIP SHA-256: `3a9752f063497178faeb27c09ab4f0da31b8af5e0ea9c592b89c7cc549969659`, matching GitHub's digest.
