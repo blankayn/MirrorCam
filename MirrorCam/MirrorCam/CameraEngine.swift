@@ -473,7 +473,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
                 if error == nil, let data = photo.fileDataRepresentation() {
                     let bias = (photo.bracketSettings as? AVCaptureAutoExposureBracketedStillImageSettings)?.exposureTargetBias ?? 0
                     self.hdrFrames.append(HDRFrame(data: data, bias: bias, metadata: photo.metadata))
-                    if self.processedPhoto == nil || abs(bias) < 0.01 { self.processedPhoto = data }
+                    if abs(bias) < 0.01 { self.processedPhoto = data }
                 }
                 return
             }
@@ -485,7 +485,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
         queue.async {
             guard self.photoPending, self.photoID == resolvedSettings.uniqueID else { return }
-            let captureError = error ?? self.processingError ?? self.nativeMovieError
+            let captureError = self.hdrCapture && self.processedPhoto != nil ? nil : (error ?? self.processingError ?? self.nativeMovieError)
             guard captureError == nil, let data = self.processedPhoto else {
                 self.processedPhoto = nil
                 self.failCapture(captureError?.localizedDescription ?? "Could not capture a photo."); return
@@ -502,7 +502,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
                 self.completeMotionIfReady(); self.emitState(); return
             }
             let generation = self.captureGeneration, options = self.capturedOptions
-            let hdr = self.hdrCapture, frames = self.hdrFrames
+            let hdr = self.hdrCapture, frames = error == nil ? self.hdrFrames : []
             self.hdrCapture = false
             self.hdrFrames.removeAll()
             self.photoQueue.async {

@@ -1,7 +1,6 @@
 import Foundation
 import CoreImage
 import ImageIO
-import Vision
 #if canImport(MobileCoreServices)
 import MobileCoreServices
 #else
@@ -102,18 +101,44 @@ enum HDRProcessor {
     private static func align(_ image: CGImage, to reference: CGImage, ratio: Double) throws -> CIImage {
         // Registration sees equal exposure and equal clipping limits. Otherwise a bright/dark
         // bracket can be mistaken for movement. Only registration uses these adjusted images.
-        let scale = min(1, 640 / CGFloat(max(reference.width, reference.height)))
+        let scale = min(1, 160 / CGFloat(max(reference.width, reference.height)))
         let limit = min(1, 1 / ratio)
         let target = try registrationImage(image, ratio: ratio, limit: limit, scale: scale)
         let baseline = try registrationImage(reference, ratio: 1, limit: limit, scale: scale)
-        let request = VNTranslationalImageRegistrationRequest(targetedCGImage: target, options: [:])
-        request.usesCPUOnly = true
-        try VNImageRequestHandler(cgImage: baseline, options: [:]).perform([request])
-        guard let result = request.results?.first as? VNImageTranslationAlignmentObservation else {
-            throw CameraError.message("Hold still: HDR exposures could not be aligned.")
+        let targetPixels = try luminance(target), referencePixels = try luminance(baseline)
+        let width = baseline.width, height = baseline.height
+        let maxX = max(1, Int(ceil(Double(width) * 0.04))), maxY = max(1, Int(ceil(Double(height) * 0.04)))
+        func score(_ dx: Int, _ dy: Int) -> Double {
+            var difference: Double = 0, count = 0
+            for y in stride(from: maxY + 1, to: height - maxY - 1, by: 2) {
+                for x in stride(from: maxX + 1, to: width - maxX - 1, by: 2) {
+                    let value = referencePixels[y * width + x]
+                    // Exclude clipped regions with no reliable texture.
+                    if value <= 8 || value >= 247 { continue }
+                    let other = targetPixels[(y - dy) * width + x - dx]
+                    difference += abs(Double(value) - Double(other)); count += 1
+                }
+            }
+            return count > 20 ? difference / Double(count) : 0
         }
-        var transform = result.alignmentTransform
-        transform.tx /= scale; transform.ty /= scale
+        var bestX = 0, bestY = 0, best = score(0, 0)
+        for dy in -maxY...maxY {
+            for dx in -maxX...maxX {
+                let candidate = score(dx, dy)
+                if candidate < best - 0.001 { best = candidate; bestX = dx; bestY = dy }
+            }
+        }
+        guard best < 28 else { throw CameraError.message("Hold still: HDR images differ too much to align.") }
+        func fraction(_ left: Double, _ center: Double, _ right: Double) -> CGFloat {
+            let denominator = left - 2 * center + right
+            guard denominator > 0.001 else { return 0 }
+            return CGFloat(max(-0.5, min(0.5, 0.5 * (left - right) / denominator)))
+        }
+        let subX = abs(bestX) < maxX ? fraction(score(bestX - 1, bestY), best, score(bestX + 1, bestY)) : 0
+        let subY = abs(bestY) < maxY ? fraction(score(bestX, bestY - 1), best, score(bestX, bestY + 1)) : 0
+        // Bitmap rows go down, while Core Image's vertical coordinates go up.
+        let transform = CGAffineTransform(translationX: (CGFloat(bestX) + subX) / scale,
+            y: -(CGFloat(bestY) + subY) / scale)
         guard abs(transform.tx) <= CGFloat(image.width) * 0.04,
               abs(transform.ty) <= CGFloat(image.height) * 0.04 else {
             throw CameraError.message("Too much camera movement for HDR (translation \(transform.tx), \(transform.ty); exposure ratio \(ratio)).")
@@ -129,5 +154,17 @@ enum HDRProcessor {
               let result = context.createCGImage(normalized, from: small.extent, format: .RGBA8,
                 colorSpace: CGColorSpace(name: CGColorSpace.sRGB)) else { throw CameraError.message("HDR alignment could not be prepared.") }
         return result
+    }
+
+    private static func luminance(_ image: CGImage) throws -> [UInt8] {
+        guard let bitmap = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
+            bytesPerRow: image.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
+              let memory = bitmap.data else { throw CameraError.message("HDR alignment memory is unavailable.") }
+        bitmap.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let bytes = memory.assumingMemoryBound(to: UInt8.self)
+        return (0..<image.width * image.height).map { index in
+            UInt8((Int(bytes[index * 4]) * 54 + Int(bytes[index * 4 + 1]) * 183 + Int(bytes[index * 4 + 2]) * 19) / 256)
+        }
     }
 }
