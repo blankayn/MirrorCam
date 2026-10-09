@@ -163,8 +163,14 @@ enum HDRProcessor {
               let memory = bitmap.data else { throw CameraError.message("HDR alignment memory is unavailable.") }
         bitmap.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         let bytes = memory.assumingMemoryBound(to: UInt8.self)
-        return (0..<image.width * image.height).map { index in
-            UInt8((Int(bytes[index * 4]) * 54 + Int(bytes[index * 4 + 1]) * 183 + Int(bytes[index * 4 + 2]) * 19) / 256)
+        var result = [UInt8](); result.reserveCapacity(image.width * image.height)
+        for index in 0..<(image.width * image.height) {
+            let offset = index * 4
+            let red = Int(bytes[offset]) * 54
+            let green = Int(bytes[offset + 1]) * 183
+            let blue = Int(bytes[offset + 2]) * 19
+            result.append(UInt8((red + green + blue) / 256))
         }
+        return result
     }
 }
