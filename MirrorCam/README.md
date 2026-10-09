@@ -2,7 +2,7 @@
 
 A native Swift / UIKit camera project for **iPhone 6, iOS 12.0 or later**. Uses AVFoundation, PhotoKit and AVKit; no SwiftUI, package manager, network service, or third-party runtime dependency.
 
-**Build status:** source and project generated on Windows. Structural checks and Swift syntax parsing passed. No iOS compilation, SDK type-check, simulator run, or physical-device test has been performed. No IPA is supplied until you build it on macOS. See `docs/VALIDATION.md`.
+**Build status:** Xcode 15.4 successfully built the Release arm64 iOS app on GitHub's macOS runner on 9 October 2026. [Download the unsigned IPA artifact](https://github.com/blankayn/MirrorCam/actions/runs/37889696067/artifacts/11597787130), extract its ZIP, and sign/install the IPA with Sideloadly. This artifact expires on 16 October; run the workflow again for a fresh download. Structural checks and Swift syntax parsing also passed. No simulator or physical-device tests have been performed. See `docs/VALIDATION.md`.
 
 ## What is implemented
 

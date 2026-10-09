@@ -1,6 +1,6 @@
 # Build MirrorCam from Windows without owning a Mac
 
-The included GitHub Actions workflow uses a GitHub-hosted macOS machine with Xcode 15.4 to build an unsigned iPhone IPA. You download the IPA to Windows, then Sideloadly signs and installs it. Your phone is needed only at the installation stage. This workflow has been prepared locally; no cloud build has been run yet.
+The included GitHub Actions workflow uses a GitHub-hosted macOS machine with Xcode 15.4 to build an unsigned iPhone IPA. You download the IPA to Windows, then Sideloadly signs and installs it. Your phone is needed only at the installation stage. The [first cloud build succeeded](https://github.com/blankayn/MirrorCam/actions/runs/37889696067) on 9 October 2026. [Download its IPA artifact](https://github.com/blankayn/MirrorCam/actions/runs/37889696067/artifacts/11597787130) and extract the ZIP. It expires on 16 October 2026; rerun the workflow when needed. Installation and physical-device tests are still pending.
 
 ## Availability and cost
 
