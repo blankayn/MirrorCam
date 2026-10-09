@@ -13,6 +13,9 @@ final class CameraViewController: UIViewController {
     private var photoOptions = PhotoOptions()
     private var previewAspect: NSLayoutConstraint?
     private var zoomLimit: CGFloat = 4
+    private var irisRequested = false
+    private var nativeLive = false
+    private var liveDiagnostic = "Software LIVE capture"
     private let gridButton = UIButton(type: .system)
     private let timerButton = UIButton(type: .system)
     private let flashButton = UIButton(type: .system)
@@ -45,6 +48,12 @@ final class CameraViewController: UIViewController {
         buildUI()
         preview.previewLayer.session = engine.session
         preview.previewLayer.videoGravity = .resizeAspectFill
+        engine.onLiveBackend = { [weak self] native, diagnostic in
+            guard let self = self else { return }
+            self.nativeLive = native; self.liveDiagnostic = diagnostic
+            if native { self.photoOptions = PhotoOptions() }
+            self.updateFrame(); self.updateStatus()
+        }
         engine.onZoom = { [weak self] actual, limit in
             guard let self = self else { return }
             self.zoom = actual; self.zoomLimit = limit
@@ -313,6 +322,7 @@ final class CameraViewController: UIViewController {
             if saving { status.text = "Saving capture…" }
             else if busy { status.text = mode == .motion ? "Hold steady · capturing Live Photo…" : "Processing…" }
             else if !ready { status.text = "Camera unavailable" }
+            else if mode == .motion && nativeLive { status.text = "Iris12 experiment · native LIVE ready" }
             else if mode == .motion { status.text = motionReady ? "LIVE ready · 1.5s before + after" : "LIVE warming up · wait for full pre-roll" }
             else { status.text = front ? "Mirror preview · saved mirror \(mirrored ? "on" : "off")" : "Rear camera" }
         }
@@ -397,17 +407,28 @@ final class CameraViewController: UIViewController {
 
     @objc private func adjustPhotoSize() {
         let alert = UIAlertController(title: "Photo Size and Zoom Adjustment",
-            message: "Choose the visible frame or output resolution. Use the zoom slider, pinch, or tap the zoom number to reset to 1×. LIVE stills use the video frame's resolution.", preferredStyle: .actionSheet)
+            message: nativeLive ? "Iris12 experiment uses native 4:3 photos at maximum resolution.\n\(liveDiagnostic)"
+                : "Choose framing or resolution. Software LIVE stills use the video frame's resolution. Iris12 experiment tries native capture on iOS 12 and falls back if rejected.", preferredStyle: .actionSheet)
         for aspect in PhotoAspect.allCases {
-            alert.addAction(UIAlertAction(title: "\(aspect == photoOptions.aspect ? "✓ " : "")\(aspect.title)", style: .default) { [weak self] _ in
+            let action = UIAlertAction(title: "\(aspect == photoOptions.aspect ? "✓ " : "")\(aspect.title)", style: .default) { [weak self] _ in
                 self?.photoOptions.aspect = aspect; self?.updateFrame()
-            })
+            }
+            action.isEnabled = !nativeLive; alert.addAction(action)
         }
         for resolution in PhotoResolution.allCases {
-            alert.addAction(UIAlertAction(title: "\(resolution == photoOptions.resolution ? "✓ " : "")Size: \(resolution.title)", style: .default) { [weak self] _ in
+            let action = UIAlertAction(title: "\(resolution == photoOptions.resolution ? "✓ " : "")Size: \(resolution.title)", style: .default) { [weak self] _ in
                 self?.photoOptions.resolution = resolution; self?.updateFrame()
-            })
+            }
+            action.isEnabled = !nativeLive; alert.addAction(action)
         }
+        alert.addAction(UIAlertAction(title: irisRequested ? "Turn Iris12 experiment off" : "Try Iris12 native capture (iOS 12)", style: .default) { [weak self] _ in
+            guard let self = self else { return }
+            self.irisRequested.toggle(); self.modeSwitchPending = true; self.updateControls()
+            self.engine.setIrisExperiment(self.irisRequested)
+        })
+        alert.addAction(UIAlertAction(title: "LIVE capture status", style: .default) { [weak self] _ in
+            guard let self = self else { return }; self.showMessage(self.liveDiagnostic)
+        })
         alert.addAction(UIAlertAction(title: "Reset zoom to 1×", style: .default) { [weak self] _ in self?.resetZoom() })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.popoverPresentationController?.sourceView = frameButton

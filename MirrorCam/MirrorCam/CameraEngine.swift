@@ -14,6 +14,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
     var onBufferReady: ((Bool) -> Void)?
     var onModeChanged: ((CaptureMode) -> Void)?
     var onZoom: ((CGFloat, CGFloat) -> Void)? // actual zoom, hardware limit
+    var onLiveBackend: ((Bool, String) -> Void)? // native backend active, diagnostic
 
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -45,6 +46,14 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
     private var photoOptions = PhotoOptions()
     private var capturedOptions = PhotoOptions()
     private var requestedZoom: CGFloat = 1
+    private var irisRequested = false
+    private var irisDiagnostic = "Software LIVE capture"
+    private var nativeUnavailable = false
+    private var nativeEnabled = false
+    private var nativeCapture = false
+    private var nativeMovieURL: URL?
+    private var nativeMovieReady = false
+    private var nativeMovieError: Error?
     private let photoQueue = DispatchQueue(label: "com.mirrorcam.photo", qos: .userInitiated)
     private var observers: [NSObjectProtocol] = []
     private var busy: Bool { return photoPending || writer != nil || recordRequested || finishing || motionPending }
@@ -75,6 +84,12 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
             self?.queue.async { [weak self] in
                 guard let self = self else { return }
                 self.clearBuffer()
+                if self.nativeEnabled || self.nativeCapture {
+                    self.interrupted = false
+                    if self.nativeCapture { self.failCapture(error?.localizedDescription ?? "Native capture service stopped.") }
+                    else { self.fallbackFromNative(error?.localizedDescription ?? "Native capture service stopped.") }
+                    return
+                }
                 self.failCapture(error?.localizedDescription ?? "The camera stopped unexpectedly.")
                 if error?.code == .mediaServicesWereReset { self.startIfNeeded() }
                 else { self.interrupted = true; self.emitState() }
@@ -143,23 +158,28 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
         queue.async {
             guard self.configured, !self.busy else { return }
             self.setTorch(false)
+            if self.session.isRunning { self.session.stopRunning() }
+            _ = MCSetLivePhotoEnabled(self.photoOutput, false)
+            self.nativeEnabled = false
+            let useNative = newMode == .motion && self.irisRequested && !self.nativeUnavailable
             self.session.beginConfiguration()
             self.mode = newMode
-            let preset: AVCaptureSession.Preset = newMode == .photo ? .photo : (newMode == .motion ? .vga640x480 : .hd1280x720)
-            if newMode == .photo {
+            let preset: AVCaptureSession.Preset = newMode == .photo || useNative ? .photo : (newMode == .motion ? .vga640x480 : .hd1280x720)
+            if newMode == .photo || useNative {
                 if self.session.outputs.contains(where: { $0 === self.videoOutput }) { self.session.removeOutput(self.videoOutput) }
             }
             if self.session.canSetSessionPreset(preset) { self.session.sessionPreset = preset }
             else { self.session.sessionPreset = .medium }
-            if newMode != .photo && !self.session.outputs.contains(where: { $0 === self.videoOutput }) {
+            if newMode != .photo && !useNative && !self.session.outputs.contains(where: { $0 === self.videoOutput }) {
                 if self.session.canAddOutput(self.videoOutput) { self.session.addOutput(self.videoOutput) }
                 else {
                     self.mode = .photo
                     self.session.sessionPreset = .photo
                     self.session.commitConfiguration()
                     self.report("Video data capture is unavailable on this camera.")
+                    self.emitLiveBackend("Software capture; camera reverted to Photo mode.")
                     DispatchQueue.main.async { self.onModeChanged?(.photo) }
-                    self.emitState(); return
+                    self.startIfNeeded(); return
                 }
             }
             if microphone && newMode != .photo && self.audioInput == nil {
@@ -180,11 +200,53 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
             self.applyConnections()
             self.videoOutput.connection(with: .video)?.isEnabled = newMode != .photo
             self.session.commitConfiguration()
-            self.configureFrameRate(newMode == .motion ? 15 : 30)
+            if useNative {
+                self.configureFrameRate(30)
+                if let rejection = MCSetLivePhotoEnabled(self.photoOutput, true) {
+                    self.fallbackFromNative(rejection); return
+                }
+                self.nativeEnabled = true
+            } else { self.configureFrameRate(newMode == .motion ? 15 : 30) }
             self.applyZoom()
-            self.clearBuffer(); self.emitState()
+            self.clearBuffer(); self.startIfNeeded()
+            let diagnostic = self.nativeEnabled
+                ? "\(self.irisDiagnostic)\nNative Live Photo capture enabled; capture and playback still need a device test."
+                : (self.irisRequested ? "\(self.irisDiagnostic)\nSoftware LIVE capture\(newMode == .motion ? " selected." : "; enter LIVE to try native capture.")" : "Software LIVE capture")
+            self.emitLiveBackend(diagnostic)
             DispatchQueue.main.async { self.onModeChanged?(newMode) }
         }
+    }
+
+    func setIrisExperiment(_ enabled: Bool) {
+        queue.async {
+            guard self.configured, !self.busy else { return }
+            if self.session.isRunning { self.session.stopRunning() }
+            _ = MCSetLivePhotoEnabled(self.photoOutput, false)
+            self.nativeEnabled = false; self.nativeUnavailable = false
+            self.irisRequested = enabled
+            if #available(iOS 13, *) { self.irisRequested = false }
+            let diagnostic: String
+            if self.irisRequested { diagnostic = MCIrisInstallHooks() }
+            else { MCIrisRestoreHooks(); diagnostic = "Iris12 experiment off; software LIVE capture selected." }
+            self.irisDiagnostic = diagnostic
+            self.emitLiveBackend(diagnostic)
+            self.setMode(self.mode, microphone: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized)
+        }
+    }
+
+    private func emitLiveBackend(_ message: String) {
+        let native = nativeEnabled
+        DispatchQueue.main.async { self.onLiveBackend?(native, message) }
+    }
+
+    private func fallbackFromNative(_ message: String) {
+        nativeEnabled = false; nativeUnavailable = true
+        _ = MCSetLivePhotoEnabled(photoOutput, false)
+        MCIrisRestoreHooks()
+        irisDiagnostic = "Native capture rejected: \(message)"
+        emitLiveBackend(irisDiagnostic)
+        setMode(.motion, microphone: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized)
+        report("Iris12 experiment: \(message)\nMirrorCam is returning to software LIVE. Wait for LIVE ready before capturing again.")
     }
 
     private func configureFrameRate(_ fps: Double) {
@@ -207,15 +269,25 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
             do {
                 let replacement = try AVCaptureDeviceInput(device: device)
                 self.setTorch(false)
+                if self.nativeEnabled {
+                    if self.session.isRunning { self.session.stopRunning() }
+                    _ = MCSetLivePhotoEnabled(self.photoOutput, false)
+                    self.nativeEnabled = false
+                }
                 self.session.beginConfiguration()
                 self.session.removeInput(old)
                 if self.session.canAddInput(replacement) { self.session.addInput(replacement); self.input = replacement }
                 else { self.session.addInput(old); self.report("Could not switch cameras.") }
                 self.applyConnections()
                 self.session.commitConfiguration()
-                self.configureFrameRate(self.mode == .motion ? 15 : 30)
+                if !self.nativeEnabled { self.configureFrameRate(self.mode == .motion ? 15 : 30) }
                 self.requestedZoom = 1; self.applyZoom()
-                self.clearBuffer(); self.emitState()
+                self.clearBuffer()
+                if self.mode == .motion && self.irisRequested {
+                    self.nativeUnavailable = false
+                    self.irisDiagnostic = MCIrisInstallHooks()
+                    self.setMode(.motion, microphone: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized)
+                } else { self.startIfNeeded() }
             } catch { self.report(error.localizedDescription) }
         }
     }
@@ -298,6 +370,16 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
             self.captureGeneration = UUID()
             let generation = self.captureGeneration
             if self.mode == .motion {
+                if self.nativeEnabled {
+                    self.nativeCapture = true; self.motionPending = true
+                    self.nativeMovieURL = Self.temporaryMovie(motion: true)
+                    self.nativeMovieReady = false; self.nativeMovieError = nil
+                    self.capturePhoto()
+                    self.queue.asyncAfter(deadline: .now() + 10) {
+                        if self.captureGeneration == generation && self.nativeCapture { self.failCapture("Native Live Photo capture timed out.") }
+                    }
+                    return
+                }
                 guard let first = self.buffer.video.first, let lastSample = self.buffer.video.last,
                       let last = self.buffer.lastTime, let pixels = CMSampleBufferGetImageBuffer(lastSample) else {
                     self.report("Motion camera is warming up. Try again in a moment."); return
@@ -343,13 +425,16 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
         let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
         photoID = settings.uniqueID
         processedPhoto = nil; processingError = nil
-        settings.isHighResolutionPhotoEnabled = mode == .photo
+        settings.isHighResolutionPhotoEnabled = mode == .photo || nativeCapture
         // Still stabilization may crop relative to preview on older cameras.
         settings.isAutoStillImageStabilizationEnabled = false
         if mode == .photo, input?.device.hasFlash == true,
            photoOutput.supportedFlashModes.contains(flash) { settings.flashMode = flash }
         else { settings.flashMode = .off }
-        photoOutput.capturePhoto(with: settings, delegate: self)
+        if nativeCapture {
+            settings.livePhotoMovieFileURL = nativeMovieURL
+            if let rejection = MCCaptureNativeLivePhoto(photoOutput, settings, self) { failCapture(rejection); return }
+        } else { photoOutput.capturePhoto(with: settings, delegate: self) }
         emitState()
     }
 
@@ -364,12 +449,22 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
         queue.async {
             guard self.photoPending, self.photoID == resolvedSettings.uniqueID else { return }
-            let captureError = error ?? self.processingError
+            let captureError = error ?? self.processingError ?? self.nativeMovieError
             guard captureError == nil, let data = self.processedPhoto else {
                 self.processedPhoto = nil
                 self.failCapture(captureError?.localizedDescription ?? "Could not capture a photo."); return
             }
             self.processedPhoto = nil; self.processingError = nil
+            if self.nativeCapture {
+                guard self.nativeMovieReady, let movie = self.nativeMovieURL,
+                      FileManager.default.fileExists(atPath: movie.path) else {
+                    self.failCapture("Native capture did not produce a Live Photo movie."); return
+                }
+                self.nativeMovieURL = nil; self.nativeCapture = false; self.photoPending = false
+                // Preserve Apple's original pairing and orientation metadata in both resources.
+                self.motionPhoto = data; self.motionURL = movie
+                self.completeMotionIfReady(); self.emitState(); return
+            }
             let generation = self.captureGeneration, options = self.capturedOptions
             self.photoQueue.async {
                 let result = Result { try PhotoFraming.process(data, options: options) }
@@ -386,6 +481,17 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
         }
     }
 
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingLivePhotoToMovieFileAt outputFileURL: URL,
+                     duration: CMTime, photoDisplayTime: CMTime, resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
+        queue.async {
+            guard self.nativeCapture, self.photoPending, self.photoID == resolvedSettings.uniqueID else {
+                try? FileManager.default.removeItem(at: outputFileURL); return
+            }
+            self.nativeMovieError = error ?? (CMTimeGetSeconds(duration) > 0 ? nil : CameraError.message("Native Live Photo movie was empty."))
+            self.nativeMovieURL = outputFileURL; self.nativeMovieReady = self.nativeMovieError == nil
+        }
+    }
+
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard visible, !interrupted else { return }
         let isVideo = output === videoOutput
@@ -397,7 +503,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
                 DispatchQueue.main.async { self.onRecording?(true) }
             }
             if let writer = writer { try writer.append(sampleBuffer, isVideo: isVideo) }
-            if mode == .motion, !motionPending {
+            if mode == .motion, !nativeEnabled, !motionPending {
                 if isVideo { buffer.appendVideo(sampleBuffer) } else { buffer.appendAudio(sampleBuffer) }
                 let ready = buffer.span >= 1.35
                 if ready != bufferReady {
@@ -452,12 +558,18 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
         writer?.cancel(); writer = nil
         if let url = motionURL { try? FileManager.default.removeItem(at: url) }
         motionURL = nil; motionPhoto = nil; motionEnd = nil; motionPending = false; photoPending = false
+        if let url = nativeMovieURL { try? FileManager.default.removeItem(at: url) }
+        nativeMovieURL = nil; nativeCapture = false; nativeMovieReady = false; nativeMovieError = nil
         processedPhoto = nil; processingError = nil
         clearBuffer(); emitState(); report(message)
     }
 
     private func failCapture(_ message: String) {
-        if motionPending { abortMotion(message) }
+        if nativeCapture {
+            abortMotion("Native Live Photo failed: \(message)")
+            fallbackFromNative(message)
+        }
+        else if motionPending { abortMotion(message) }
         else {
             writer?.cancel(); writer = nil; photoPending = false; recordRequested = false
             processedPhoto = nil; processingError = nil

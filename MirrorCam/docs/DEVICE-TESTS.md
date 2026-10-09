@@ -1,6 +1,6 @@
 # Device acceptance checklist
 
-Version 1.0: the user reports successful installation and launch. The following detailed checks and version 1.1 runtime checks remain pending.
+Version 1.0: the user reports successful installation and launch. The following detailed checks and version 1.1/1.2 runtime checks remain pending.
 
 Use a physical iPhone 6 on iOS 12. Record the OS patch, Xcode version, build log, and results. A successful Windows structural/syntax check is not an iOS build or runtime pass.
 
@@ -24,6 +24,11 @@ Use a physical iPhone 6 on iOS 12. Record the OS patch, Xcode version, build log
 | Motion full pre-roll | Wait for LIVE ready, move a numbered card before shutter and after; resulting clip shows both sides of shutter and is roughly 3 s long. |
 | Motion early shutter | Just after mode entry, either warming-up feedback or a shorter lead-in; never a crash. |
 | LIVE pair | JPEG still and MOV show consistent orientation and mirror state; gallery displays still and plays clip. |
+| Iris12 default | After a fresh launch the experiment is off; software LIVE still works. |
+| Iris12 enable/status | In LIVE, tap 4:3 Â· Max â†’ Try Iris12 native capture. LIVE capture status reports hook/configuration results; unsupported capture returns to software with a reason. |
+| Iris12 front/rear | If accepted, capture on each camera, verify pre/post-shutter motion and audio, hold in Library, save to Photos and hold there. Acceptance flags alone do not pass this check. |
+| Iris12 framing/mirror | Native mode shows a 4:3 maximum-resolution frame, disables alternate sizes, preserves 1Ã— framing and saved Mirror On/Off in portrait/landscape. |
+| Iris12 recovery | Exercise lens/mode changes, background/interruption, native rejection and timeout. UI recovers, original methods restore on disable, and software captures remain available. Record any unexpected exit and reopen with the experiment off. |
 | Buffer reset | Switch, rotate or toggle mirror in Motion; no stale frames from the previous configuration. |
 | Rotation | Capture photos and videos held portrait, upside-down and both landscapes; saved files appear upright in Photos and playback. Change orientation while recording: clip dimensions stay stable. |
 | Fast shutter taps | No duplicate photos, overlapping writers, stuck recording state or unexpected mode changes. |
@@ -43,8 +48,8 @@ Inspect video properties (duration, dimensions, audio track) on macOS with AVAss
 
 ## Version 1.1 framing and LIVE checks
 
-- Front/rear, Photo/LIVE: at 1×, hold a card with marks at each visible frame edge. The same marks must remain at corresponding saved-image edges in Library and Photos. Repeat at each aspect ratio, size and supported zoom, in portrait and both landscapes.
-- Switch mode at 2×: the zoom readout and actual framing stay consistent. Switching lenses resets both to 1×. Tap the zoom number to restore the full 1× view. Front camera zoom may be unavailable; the slider must disable and show 1×.
+- Front/rear, Photo/LIVE: at 1Ã—, hold a card with marks at each visible frame edge. The same marks must remain at corresponding saved-image edges in Library and Photos. Repeat at each aspect ratio, size and supported zoom, in portrait and both landscapes.
+- Switch mode at 2Ã—: the zoom readout and actual framing stay consistent. Switching lenses resets both to 1Ã—. Tap the zoom number to restore the full 1Ã— view. Front camera zoom may be unavailable; the slider must disable and show 1Ã—.
 - Default 4:3 full framing must not crop; square/wide crops must be visible before capture. Smaller output resolution must preserve the same composition.
 - LIVE: capture motion and sound, hold the Library photo to animate, release to stop, and play the clip separately. Save to Photos must create one asset showing the LIVE badge and press-and-hold animation.
 - LIVE fallback: if import fails, local JPEG/MOV remain playable. Save photo + video must create two assets only when explicitly chosen.

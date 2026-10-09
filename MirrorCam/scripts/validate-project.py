@@ -65,7 +65,7 @@ for ref in references:
     if ref.get("sourceTree") == "<group>": check((source / ref["path"]).exists(), ref["path"] + " exists")
 phase = next(obj for obj in objects.values() if obj.get("isa") == "PBXSourcesBuildPhase")
 compiled = {objects[objects[ref]["fileRef"]]["path"] for ref in phase["files"]}
-check(compiled == {p.name for p in source.glob("*.swift")}, "Every Swift file belongs to the app source phase")
+check(compiled == {p.name for p in source.iterdir() if p.suffix in {".swift", ".m"}}, "Every Swift/Objective-C file belongs to the app source phase")
 for obj in objects.values():
     if obj.get("isa") == "XCBuildConfiguration":
         settings = obj["buildSettings"]

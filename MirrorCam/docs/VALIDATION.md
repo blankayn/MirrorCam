@@ -22,3 +22,9 @@ The [GitHub Actions run 37889696067](https://github.com/blankayn/MirrorCam/actio
 - Downloaded IPA archive integrity and Info.plist/version/arm64 checks passed. Artifact ZIP SHA-256: `8a38d5a2ed8c6e4e3b1e35b1c68f3fc5d220ffd78cba9882919c4d979d88ac43`, matching GitHub's digest.
 
 The user confirmed version 1.0 installs and launches on the iPhone. No simulator test or physical-device test of version 1.1 was performed. Synthetic PhotoKit recognition on macOS does not establish iOS 12 Photos-library import, touch-and-hold playback, actual camera field of view, microphone sync or device performance. Run `DEVICE-TESTS.md` on the iPhone 6 after installation.
+
+## Version 1.2 (pending build)
+
+- Local validation: **118 structural/syntax checks passed across ten Swift files**. This includes Objective-C source membership and bridging-header references; Objective-C compilation is not validated on Windows.
+- Iris12 0.0.2 was statically analyzed from the author's repository without executing its code. Package hash, filter, arm64 code and observed hook targets are recorded in `IRIS12-ANALYSIS.md`.
+- Native Live Photo delegates, session reconfiguration, error cleanup and bridging were reviewed. No native-hook execution, simulator execution or physical iPhone test has been performed. The existing synthetic media tests exercise the software path, not the Iris12 hook or native camera pipeline.
