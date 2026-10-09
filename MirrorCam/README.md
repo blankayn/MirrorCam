@@ -2,7 +2,7 @@
 
 A native Swift / UIKit camera project for **iPhone 6, iOS 12.0 or later**. Uses AVFoundation, PhotoKit and AVKit; no SwiftUI, package manager, network service, or third-party runtime dependency.
 
-**Build status:** version 1.0 compiled with Xcode 15.4 and the user confirmed it launches on their iPhone 6. Version 1.1 adds framing controls and software-created Live Photos; its new cloud build and media checks are pending. See `docs/VALIDATION.md`.
+**Build status:** [MirrorCam 1.1 compiled successfully with Xcode 15.4](https://github.com/blankayn/MirrorCam/actions/runs/37899096832) for arm64 / iOS 12.0. All 172 synthetic media assertions passed, including actual JPEG processing, mirroring, clip timing and PhotoKit Live Photo recognition. [Download the unsigned IPA artifact](https://github.com/blankayn/MirrorCam/actions/runs/37899096832/artifacts/11601498642) and extract its ZIP; it expires on 16 October 2026. Version 1.0 was installed and launched by the user. Version 1.1 still needs camera framing, audio and Live Photo saving/playback checks on the iPhone 6. See `docs/VALIDATION.md`.
 
 ## What is implemented
 
@@ -14,7 +14,7 @@ A native Swift / UIKit camera project for **iPhone 6, iOS 12.0 or later**. Uses 
 | LIVE | Software-created JPEG + MOV Live Photo, VGA video at 15 fps, approximately 1.5 seconds before and after shutter. Touch and hold in Library to animate; Save to Photos imports a single Live Photo asset. |
 | Controls | Front/back switch, thirds grid, 0 / 3 / 10 second countdown, flash Off/Auto/On for photos where supported, flash Off/On for video, pinch zoom capped at 4Ã— or the hardware limit. |
 | Library | Local persistent gallery, still preview, video playback, sharing, save to Photos, and local deletion. |
-| Permissions | Camera required. Microphone requested on first entering Video/Motion; denial allows silent recording. Photos requested when **Save to Photos** is pressed; denial preserves the local capture. |
+| Permissions | Camera required. Microphone requested on first entering Video/LIVE; denial allows silent recording. Photos requested when **Save to Photos** is pressed; denial preserves the local capture. |
 
 The iPhone 6 does not support native Live Photo capture. LIVE uses the existing rolling video buffer and builds a JPEG + QuickTime MOV pair with a shared content identifier and timed key-photo marker. PhotoKit imports these resources as one Live Photo. This is software capture, inspired by Michael Melita's Iris12 experience; it uses public frameworks and requires no jailbreak. If PhotoKit rejects an import, the local capture remains available and **Save photo + video** provides an explicit fallback. Older Motion captures remain readable as separate-media pairs. Photos playback/import still needs verification on your iPhone 6.
 
@@ -114,11 +114,11 @@ The same archive/export can be done through Product â†’ Archive â†’ Organizer â†
 2. Copy the built IPA from the Mac to Windows. Connect the unlocked iPhone 6 with USB, approve **Trust This Computer**, and confirm iTunes/Sideloadly detects it.
 3. Select the device in Sideloadly, choose the MirrorCam IPA, and enter your Apple ID directly in Sideloadly. Press **Start** and complete any login/verification prompt there.
 4. After installation, on iOS 12 go to Settings â†’ General â†’ Profiles & Device Management (wording varies slightly), select the developer profile, and trust it.
-5. Open MirrorCam and grant Camera. Enter Video/Motion to grant Microphone. Take a capture, open Library, and press Save to Photos to grant Photos access.
+5. Open MirrorCam and grant Camera. Enter Video/LIVE to grant Microphone. Take a capture, open Library, and press Save to Photos to grant Photos access.
 
 Free-account signing normally expires after 7 days and is subject to Apple's app limits. Refresh/reinstall with the same Apple ID and bundle ID to preserve the app container; save important captures to Photos first. The [Sideloadly FAQ](https://sideloadly.io/faq.html) describes expiry and overwrite behavior. Deleting the app deletes captures stored only in its local library.
 
-## Motion and performance details
+## LIVE and performance details
 
 All capture-session mutation and sample-buffer handling runs on one serial queue. Heavy disk work uses a separate media queue; UI updates run on the main queue. Motion copies YUV pixels out of capture's reusable pool, retaining at most 25 VGA frames (around 12 MB plus padding) and a bounded audio window. The writer drains bounded queues to preserve pre-roll while the hardware encoder starts; video backpressure can drop frames rather than accumulate memory indefinitely. JPEG thumbnails are downsampled for the gallery.
 
@@ -126,4 +126,8 @@ Entering LIVE, switching lenses, rotating, toggling mirroring, or returning from
 
 Leaving the app stops video and attempts to finalize it with a short background task. In-progress Motion capture is cancelled on interruptions/backgrounding. The app does not continue camera capture in the background. Captures are stored under Application Support/Captures, each with media, a thumbnail, and JSON metadata. Save to Photos is explicit and retries retain the local copy. Local deletion does not delete assets already in Photos.
 
-Before calling this ready for use, successfully build it and run `docs/DEVICE-TESTS.md` on the actual iPhone 6/iOS 12 device, including audio sync, all orientations, pre-roll, and interruption behavior.
+After installing an update, run `docs/DEVICE-TESTS.md` on the actual iPhone 6/iOS 12 device, including edge-to-edge framing comparisons, audio sync, all orientations, pre-roll, Live Photo import and interruption behavior.
+
+## Version 1.1 update
+
+Install the new IPA over MirrorCam through Sideloadly using the same Apple ID and bundle ID. Save important captures to Photos first; avoid uninstalling if you want to keep the local library. Tap **4:3 · Max** to open Photo Size and Zoom Adjustment, use the zoom slider or pinch, and tap the zoom number to reset to 1× (the widest hardware view). Select **LIVE**, wait for **LIVE ready**, capture, open Library, then touch and hold the image. **Save to Photos** imports one Live Photo; **Save photo + video** is the explicit compatibility fallback.

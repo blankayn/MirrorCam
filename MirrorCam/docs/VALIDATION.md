@@ -16,4 +16,9 @@ The [GitHub Actions run 37889696067](https://github.com/blankayn/MirrorCam/actio
 
 ## Version 1.1
 
-Local validation: 110 structural/syntax checks passed across ten Swift files. User confirmed version 1.0 launches on their phone. Version 1.1 cloud compilation and synthetic media checks are pending; its iPhone 6 framing, audio and Live Photo import/playback remain untested.
+- Local validation: **110 structural/syntax checks passed across ten Swift files**.
+- [Cloud run 37899096832](https://github.com/blankayn/MirrorCam/actions/runs/37899096832) at commit `ac1b0abb2d16ed841f459348329f60df360df94b`: Xcode 15.4 Release iphoneos build succeeded; minimum OS 12.0, arm64, app version 1.1 (build 2).
+- **172 synthetic media assertions passed** on macOS using the actual `FrameGeometry`, `RollingBuffer`, `ClipWriter` and `PhotoFraming` implementations. Checks covered portrait/landscape crops, no resolution upscaling, even encoder dimensions, four JPEG orientation values, normalized mirrored pixels, output sizes, bounded pre-roll, three-second clip duration, matching JPEG/MOV content identifiers, key-photo time at 1.4667 seconds, and PhotoKit recognition of 4:3, square and 16:9 pairs as Live Photos.
+- Downloaded IPA archive integrity and Info.plist/version/arm64 checks passed. Artifact ZIP SHA-256: `8a38d5a2ed8c6e4e3b1e35b1c68f3fc5d220ffd78cba9882919c4d979d88ac43`, matching GitHub's digest.
+
+The user confirmed version 1.0 installs and launches on the iPhone. No simulator test or physical-device test of version 1.1 was performed. Synthetic PhotoKit recognition on macOS does not establish iOS 12 Photos-library import, touch-and-hold playback, actual camera field of view, microphone sync or device performance. Run `DEVICE-TESTS.md` on the iPhone 6 after installation.
