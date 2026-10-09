@@ -85,6 +85,7 @@ final class MediaDetailViewController: UIViewController {
         imageView.contentMode = .scaleAspectFit
         imageView.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(imageView)
         liveView.contentMode = .scaleAspectFit; liveView.isHidden = true
+        liveView.playbackGestureRecognizer.isEnabled = false
         liveView.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(liveView)
         NSLayoutConstraint.activate([
             liveView.leadingAnchor.constraint(equalTo: imageView.leadingAnchor), liveView.trailingAnchor.constraint(equalTo: imageView.trailingAnchor),

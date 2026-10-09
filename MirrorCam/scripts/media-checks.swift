@@ -8,6 +8,7 @@ import CoreServices
 func check(_ condition: @autoclosure () -> Bool, _ message: String) {
     guard condition() else { fatalError(message) }
     print("PASS: \(message)")
+    fflush(stdout)
 }
 
 for size in [CGSize(width: 1200, height: 1600), CGSize(width: 1600, height: 1200)] {
@@ -79,6 +80,7 @@ for aspect in PhotoAspect.allCases {
     reader.add(output); check(reader.startReading(), "Timed metadata reader starts")
     let timingSample = output.copyNextSampleBuffer()!
     let actualMarker = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(timingSample))
+    print("Key photo time: \(actualMarker), expected \(22.0 / 15.0)"); fflush(stdout)
     check(abs(actualMarker - 22.0 / 15.0) < 0.01, "Key-photo timing is relative to the clip start")
     reader.cancelReading()
 
