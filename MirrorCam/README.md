@@ -2,7 +2,7 @@
 
 A native Swift / UIKit camera project for **iPhone 6, iOS 12.0 or later**. Uses AVFoundation, PhotoKit and AVKit; no SwiftUI, package manager, network service, or third-party runtime dependency.
 
-**Build status:** Version 1.3 adds a full-width camera layout, three-exposure HDR and the kirtdmno library signature; build verification is pending. [Version 1.2 compiled successfully with Xcode 15.4](https://github.com/blankayn/MirrorCam/actions/runs/37902485260) for arm64 / iOS 12.0 and passed all 172 software media assertions. Version 1.0 was installed and launched by the user. HDR, the new layout, the Iris12 native experiment and actual Photos saving/playback need checks on the iPhone 6. See `docs/VALIDATION.md`.
+**Build status:** [Version 1.3 compiled successfully with Xcode 15.4](https://github.com/blankayn/MirrorCam/actions/runs/37947966167) for arm64 / iOS 12.0 and passed all **194 synthetic media assertions**, including actual HDR merging and horizontal/vertical alignment. [Download the unsigned IPA artifact](https://github.com/blankayn/MirrorCam/actions/runs/37947966167/artifacts/11624368967), extract its ZIP and sign with Sideloadly; the artifact expires on 16 October 2026. Version 1.0 was installed and launched by the user. Actual HDR camera capture, the new layout, the Iris12 experiment and Photos saving/playback need checks on the iPhone 6. See `docs/VALIDATION.md`.
 
 ## What is implemented
 
