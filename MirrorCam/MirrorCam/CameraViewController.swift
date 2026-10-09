@@ -331,7 +331,8 @@ final class CameraViewController: UIViewController {
         modes.isEnabled = idle; switchButton.isEnabled = idle
         mirrorButton.isEnabled = idle && front; flashButton.isEnabled = idle && flashAvailable
         hdrButton.isEnabled = idle && mode == .photo && hdrAvailable
-        hdrButton.setTitle(hdrRequested ? "HDR On" : "HDR Off", for: .normal)
+        hdrButton.setTitle(mode == .photo && !hdrAvailable ? "HDR —" : (hdrRequested ? "HDR On" : "HDR Off"), for: .normal)
+        hdrButton.accessibilityLabel = hdrAvailable ? "Three-exposure HDR \(hdrRequested ? "on" : "off")" : "HDR unavailable on this camera format"
         hdrButton.tintColor = hdrRequested && mode == .photo ? accent : .white
         hdrButton.alpha = hdrButton.isEnabled ? 1 : 0.4
         flashButton.isEnabled = flashButton.isEnabled && !(hdrRequested && mode == .photo && hdrAvailable)

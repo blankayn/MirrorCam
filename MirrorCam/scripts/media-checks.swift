@@ -194,6 +194,10 @@ let middleData = hdrFrames[1].data
 check(hdrPixel(middleData, xFraction: 0.875) == hdrPixel(middleData, xFraction: 0.625), "Reference photo loses detail in clipped highlights")
 check(hdrPixel(hdrData, xFraction: 0.875) > hdrPixel(hdrData, xFraction: 0.625) + 5, "HDR recovers detail from darker exposure in clipped highlights")
 check(hdrPixel(hdrData, xFraction: 0.125) > hdrPixel(middleData, xFraction: 0.125), "HDR tone mapping lifts shadow detail")
+let translatedFrames = [HDRFrame(data: hdrFixture(bias: -1.5, shift: 8), bias: -1.5), hdrFrames[1], hdrFrames[2]]
+let translatedHDR = try HDRProcessor.merge(translatedFrames, options: PhotoOptions())
+check(abs(hdrPixel(translatedHDR, xFraction: 0.7625) - hdrPixel(hdrData, xFraction: 0.7625)) < 6,
+    "HDR translation aligns the outer exposure to the center frame")
 for aspect in PhotoAspect.allCases {
     let data = try HDRProcessor.merge(hdrFrames, options: PhotoOptions(aspect: aspect, resolution: .maximum))
     let image = CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithData(data as CFData, nil)!, 0, nil)!
