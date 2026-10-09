@@ -2,6 +2,11 @@ import Foundation
 import CoreImage
 import ImageIO
 import Vision
+#if canImport(MobileCoreServices)
+import MobileCoreServices
+#else
+import CoreServices
+#endif
 
 struct HDRFrame {
     let data: Data
