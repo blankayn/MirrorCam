@@ -10,7 +10,16 @@ final class GalleryViewController: UITableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "MirrorCam Library"
+        title = "Library"
+        let libraryTitle = UILabel(); libraryTitle.text = "MirrorCam"
+        libraryTitle.font = .systemFont(ofSize: 16, weight: .semibold); libraryTitle.textColor = .white
+        let signature = UILabel(); signature.text = "by kirtdmno"
+        signature.font = .systemFont(ofSize: 11, weight: .medium)
+        signature.textColor = UIColor(red: 0.45, green: 0.95, blue: 0.82, alpha: 1)
+        let heading = UIStackView(arrangedSubviews: [libraryTitle, signature])
+        heading.axis = .vertical; heading.alignment = .center; heading.spacing = 1
+        heading.isAccessibilityElement = true; heading.accessibilityLabel = "MirrorCam library by kirtdmno"
+        navigationItem.titleView = heading
         view.backgroundColor = .black; tableView.separatorColor = UIColor(white: 0.22, alpha: 1)
         tableView.rowHeight = 82
         navigationController?.navigationBar.barStyle = .black

@@ -2,24 +2,25 @@
 
 A native Swift / UIKit camera project for **iPhone 6, iOS 12.0 or later**. Uses AVFoundation, PhotoKit and AVKit; no SwiftUI, package manager, network service, or third-party runtime dependency.
 
-**Build status:** [Version 1.2 compiled successfully with Xcode 15.4](https://github.com/blankayn/MirrorCam/actions/runs/37902485260) for arm64 / iOS 12.0 and passed all 172 software media assertions. [Download the unsigned IPA artifact](https://github.com/blankayn/MirrorCam/actions/runs/37902485260/artifacts/11602204135) and extract its ZIP; it expires on 16 October 2026. Version 1.0 was installed and launched by the user. The new Iris12 native experiment, camera framing, audio and Photos saving/playback still need checks on the iPhone 6. See `docs/VALIDATION.md`.
+**Build status:** Version 1.3 adds a full-width camera layout, three-exposure HDR and the kirtdmno library signature; build verification is pending. [Version 1.2 compiled successfully with Xcode 15.4](https://github.com/blankayn/MirrorCam/actions/runs/37902485260) for arm64 / iOS 12.0 and passed all 172 software media assertions. Version 1.0 was installed and launched by the user. HDR, the new layout, the Iris12 native experiment and actual Photos saving/playback need checks on the iPhone 6. See `docs/VALIDATION.md`.
 
 ## What is implemented
 
 | Mode / feature | Behavior |
 |---|---|
 | Photo | Full-resolution JPEG capture using `AVCapturePhotoOutput` and the photo preset. The front camera's resolution is limited by its hardware. |
+| HDR | Photo-only Off/On control where three-exposure bracketing is supported. Combines dark/normal/bright exposures, translation alignment and tone mapping into one JPEG. Flash stays off, HDR has a 1600-pixel maximum long edge; a failed merge saves a regular photo with a message. |
 | Mirror | Front preview is always mirrored. **Mirror On/Off** controls saved front-camera JPEGs and videos. Rear-camera output remains normal. |
 | Video | H.264 MP4, target 720p / 30 fps, AAC microphone audio when permitted, start/stop shutter, elapsed timer. Rear flash On uses the torch during recording. |
 | LIVE | Software-created JPEG + MOV Live Photo, VGA video at 15 fps, approximately 1.5 seconds before and after shutter. Touch and hold in Library to animate; Save to Photos imports a single Live Photo asset. |
 | Iris12 experiment | Optional iOS 12 capability overrides reverse engineered from Michael Melita's Iris12 0.0.2. Tries native `AVCapturePhotoOutput` Live Photos inside MirrorCam, reverting to software LIVE on a reported rejection/error/timeout. Physical-device outcome is unverified. |
 | Controls | Front/back switch, thirds grid, 0 / 3 / 10 second countdown, flash Off/Auto/On for photos where supported, flash Off/On for video, pinch zoom capped at 4× or the hardware limit. |
-| Library | Local persistent gallery, still preview, video playback, sharing, save to Photos, and local deletion. |
+| Library | Local persistent gallery with “by kirtdmno” in its header, still preview, video playback, sharing, save to Photos, and local deletion. |
 | Permissions | Camera required. Microphone requested on first entering Video/LIVE; denial allows silent recording. Photos requested when **Save to Photos** is pressed; denial preserves the local capture. |
 
 Apple does not advertise native Live Photo capture on iPhone 6. The default LIVE mode uses a rolling video buffer and builds a JPEG + QuickTime MOV pair with a shared content identifier and timed key-photo marker, using public frameworks without a jailbreak. PhotoKit imports these resources as one Live Photo. The optional Iris12 experiment uses private runtime capability overrides inside this app; it is off at launch. See [`docs/IRIS12-ANALYSIS.md`](docs/IRIS12-ANALYSIS.md) for the binary findings and experiment limits. If PhotoKit rejects an import, the local capture remains available and **Save photo + video** provides an explicit fallback. Older Motion captures remain readable as separate-media pairs. Photos playback/import still needs verification on your iPhone 6.
 
-The UI stays in portrait, while device rotation controls the saved media orientation. The preview is a visible capture frame between the controls: its selected aspect crop matches the saved image. The default 4:3 frame retains the full sensor view; square and 16:9 intentionally crop both preview and output. Resolution choices only downsample and never add zoom. Still/video stabilization is disabled to avoid stabilization crops. Saved photos normalize orientation/mirroring into upright pixels. The gallery uses aspect-fit display, so its display size can differ while relative framing stays the same. Mirror Off deliberately reverses the saved front image relative to the mirrored preview.
+The UI stays in portrait, while device rotation controls the saved media orientation. On iPhone 6 at standard display size (375 × 667 points), the default photo layout has a 44-point toolbar, full-width 375 × 500-point 4:3 preview and 123-point shutter area, modeled on the original Camera. The size/zoom bar overlays the preview. Video uses a full-width 16:9 preview behind the controls. Smaller displays adapt to available space. The default 4:3 frame retains the full sensor view; square and 16:9 intentionally crop both preview and output. Resolution choices only downsample and never add zoom. Still/video stabilization is disabled to avoid stabilization crops. Saved photos normalize orientation/mirroring into upright pixels. The gallery uses aspect-fit display, so its display size can differ while relative framing stays the same. Mirror Off deliberately reverses the saved front image relative to the mirrored preview.
 
 ## Project files
 
@@ -35,6 +36,7 @@ MirrorCam/
 │   ├── RollingBuffer.swift
 │   ├── FrameGeometry.swift
 │   ├── PhotoFraming.swift
+│   ├── HDRProcessor.swift
 │   ├── IrisCompatibility.h
 │   ├── IrisCompatibility.m
 │   ├── MirrorCam-Bridging-Header.h
@@ -145,3 +147,7 @@ Install the new IPA over MirrorCam through Sideloadly using the same Apple ID an
 In **LIVE**, tap **4:3 · Max** → **Try Iris12 native capture (iOS 12)**. The setting lasts for this launch. **LIVE capture status** reports installed hooks, native configuration acceptance, or the last rejection. An accepted configuration does not prove a successful capture; take a photo, open Library, touch and hold, then save to Photos and verify playback there. Try both cameras. Native capture preserves Apple's original JPEG/MOV and uses 4:3 at maximum resolution; aspect and size choices remain available in software mode. Zoom remains adjustable.
 
 On a reported exception, capture error, session error or ten-second timeout, MirrorCam restores the original capability methods and returns to software LIVE. Wait for **LIVE ready** and take a new capture. Tap **Turn Iris12 experiment off** to use software explicitly. If the app exits unexpectedly, reopen it; the experiment starts off. This app-only implementation does not enable Live Photos in Apple's Camera app. Native output mirroring, framing, audio and runtime stability require iPhone 6 testing.
+
+## Version 1.3 HDR and layout
+
+Select **PHOTO**, tap **HDR Off** to enable it, and hold the camera still while taking the photo. HDR is disabled in Video/LIVE and on formats without three-exposure bracket support. It uses public iOS 12 APIs, not a private Apple still-HDR switch or video-HDR setting. This is MirrorCam's own HDR processing; it does not reproduce Apple's proprietary Camera algorithm. Capture uses biases near −1.5 / 0 / +1.5 EV, aligns the outer images to the normal exposure with Vision, uses actual EXIF exposure ratios when available, then merges/tone-maps with Core Image. Strong movement or missing exposures can cause a regular-photo fallback. HDR maximum resolution is 1600 pixels on the long edge to bound decoded image memory on iPhone 6; lower selected sizes and aspect crops still apply. HDR Off retains full-resolution photo capture. Your name appears in the library header and is not burned into captured images.

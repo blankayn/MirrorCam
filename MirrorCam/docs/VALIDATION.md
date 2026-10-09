@@ -30,3 +30,9 @@ The user confirmed version 1.0 installs and launches on the iPhone. No simulator
 - Native Live Photo delegates, session reconfiguration, error cleanup and bridging were reviewed. No native-hook execution, simulator execution or physical iPhone test has been performed. The existing synthetic media tests exercise the software path, not the Iris12 hook or native camera pipeline.
 - [Cloud run 37902485260](https://github.com/blankayn/MirrorCam/actions/runs/37902485260) at commit `fa9c41449822ead203973c8d5f8af684ec064f67`: Xcode 15.4 Release iphoneos build succeeded, including Objective-C runtime hooks and Swift bridging. Cloud structural validation passed 108 checks; all **172 software media assertions passed**. The local parser adds ten Swift syntax checks.
 - Downloaded IPA: version 1.2 (build 3), arm64, minimum OS 12.0 in both Info.plist and Mach-O, embedded Swift libraries present, archive integrity verified. Artifact ZIP SHA-256: `3a9752f063497178faeb27c09ab4f0da31b8af5e0ea9c592b89c7cc549969659`, matching GitHub's digest.
+
+## Version 1.3 (pending build)
+
+- Windows validation passed **123 structural/syntax checks across eleven Swift files**.
+- Camera layout follows a 44 + 500 + 123-point photo layout at standard iPhone 6 display size. No UIKit runtime/layout or physical-device check has been performed yet.
+- New HDR checks exercise actual alignment, merge/tone mapping, clipped-highlight recovery, shadow detail, EXIF exposure ratios, mirror normalization, aspect framing, incomplete brackets and the 1600-pixel processing bound. Execution is pending on the cloud Mac. Actual camera bracketing, movement handling, latency, memory and Photos saving need device tests.

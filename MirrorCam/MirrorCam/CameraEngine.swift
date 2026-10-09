@@ -15,6 +15,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
     var onModeChanged: ((CaptureMode) -> Void)?
     var onZoom: ((CGFloat, CGFloat) -> Void)? // actual zoom, hardware limit
     var onLiveBackend: ((Bool, String) -> Void)? // native backend active, diagnostic
+    var onHDR: ((Bool) -> Void)? // bracket capture available on the current camera
 
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -37,6 +38,14 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
     private var photoID: Int64?
     private var processedPhoto: Data?
     private var processingError: Error?
+    private var hdrRequested = false
+    private var hdrCapture = false
+    private var hdrFrames: [HDRFrame] = []
+    private var hdrSupported: Bool {
+        guard configured, let device = input?.device else { return false }
+        return photoOutput.maxBracketedCapturePhotoCount >= 3 && device.isExposureModeSupported(.continuousAutoExposure)
+            && device.minExposureTargetBias < 0 && device.maxExposureTargetBias > 0
+    }
     private var captureGeneration = UUID()
     private var motionPending = false
     private var motionEnd: CMTime?
@@ -67,6 +76,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
                 self.interrupted = true
                 self.clearBuffer()
                 self.stopRecording()
+                if self.hdrCapture { self.failCapture("HDR capture was interrupted. Please try again.") }
                 if self.motionPending { self.abortMotion("Motion capture was interrupted. Please try again.") }
                 self.emitState()
                 self.report("Camera interrupted. It will resume when the camera becomes available.")
@@ -141,6 +151,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
             }
             else {
                 self.stopRecording()
+                if self.hdrCapture { self.failCapture("HDR capture was cancelled when the camera closed.") }
                 if self.motionPending { self.abortMotion("Motion capture was cancelled when the camera closed.") }
                 self.setTorch(false)
                 if self.session.isRunning { self.session.stopRunning() }
@@ -324,6 +335,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
     }
 
     func setFlash(_ value: AVCaptureDevice.FlashMode) { queue.async { if !self.busy { self.flash = value } } }
+    func setHDR(_ enabled: Bool) { queue.async { if !self.busy { self.hdrRequested = enabled } } }
 
     func zoom(_ factor: CGFloat) {
         queue.async {
@@ -422,25 +434,49 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
 
     private func capturePhoto() {
         photoPending = true
-        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+        hdrCapture = mode == .photo && hdrRequested && hdrSupported
+        hdrFrames.removeAll()
+        let settings: AVCapturePhotoSettings
+        if hdrCapture, let device = input?.device {
+            let biases: [Float] = [max(-1.5, device.minExposureTargetBias), 0, min(1.5, device.maxExposureTargetBias)]
+            let bracket = biases.map { AVCaptureAutoExposureBracketedStillImageSettings.autoExposureSettings(exposureTargetBias: $0) }
+            settings = AVCapturePhotoBracketSettings(rawPixelFormatType: 0,
+                processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg], bracketedSettings: bracket)
+        } else { settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg]) }
         photoID = settings.uniqueID
         processedPhoto = nil; processingError = nil
         settings.isHighResolutionPhotoEnabled = mode == .photo || nativeCapture
         // Still stabilization may crop relative to preview on older cameras.
         settings.isAutoStillImageStabilizationEnabled = false
-        if mode == .photo, input?.device.hasFlash == true,
+        if mode == .photo, !hdrCapture, input?.device.hasFlash == true,
            photoOutput.supportedFlashModes.contains(flash) { settings.flashMode = flash }
         else { settings.flashMode = .off }
         if nativeCapture {
             settings.livePhotoMovieFileURL = nativeMovieURL
             if let rejection = MCCaptureNativeLivePhoto(photoOutput, settings, self) { failCapture(rejection); return }
-        } else { photoOutput.capturePhoto(with: settings, delegate: self) }
+        } else if let rejection = MCCaptureNativeLivePhoto(photoOutput, settings, self) { failCapture(rejection); return }
+        let generation = captureGeneration
+        if hdrCapture {
+            queue.asyncAfter(deadline: .now() + 12) {
+                if self.captureGeneration == generation && self.photoPending && self.hdrCapture {
+                    self.failCapture("HDR capture timed out. Try HDR Off, then capture again.")
+                }
+            }
+        }
         emitState()
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         queue.async {
             guard self.photoPending, self.photoID == photo.resolvedSettings.uniqueID else { return }
+            if self.hdrCapture {
+                if error == nil, let data = photo.fileDataRepresentation() {
+                    let bias = (photo.bracketSettings as? AVCaptureAutoExposureBracketedStillImageSettings)?.exposureTargetBias ?? 0
+                    self.hdrFrames.append(HDRFrame(data: data, bias: bias, metadata: photo.metadata))
+                    if self.processedPhoto == nil || abs(bias) < 0.01 { self.processedPhoto = data }
+                }
+                return
+            }
             self.processingError = error
             self.processedPhoto = photo.fileDataRepresentation()
         }
@@ -466,15 +502,26 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
                 self.completeMotionIfReady(); self.emitState(); return
             }
             let generation = self.captureGeneration, options = self.capturedOptions
+            let hdr = self.hdrCapture, frames = self.hdrFrames
+            self.hdrCapture = false
+            self.hdrFrames.removeAll()
             self.photoQueue.async {
-                let result = Result { try PhotoFraming.process(data, options: options) }
+                var hdrFallback = false
+                let result = Result { () throws -> Data in
+                    if hdr {
+                        do { return try HDRProcessor.merge(frames, options: options) }
+                        catch { hdrFallback = true }
+                    }
+                    return try PhotoFraming.process(data, options: options)
+                }
                 self.queue.async {
                     guard self.captureGeneration == generation, self.photoPending else { return }
-                    self.photoPending = false
+                    self.photoPending = false; self.hdrCapture = false
                     switch result {
                     case .success(let data): DispatchQueue.main.async { self.onCapture?(data, nil, .photo) }
                     case .failure(let error): self.failCapture(error.localizedDescription)
                     }
+                    if hdrFallback { self.report("HDR could not merge these exposures. A regular photo was saved; hold still and try again.") }
                     self.emitState()
                 }
             }
@@ -572,6 +619,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
         else if motionPending { abortMotion(message) }
         else {
             writer?.cancel(); writer = nil; photoPending = false; recordRequested = false
+            hdrCapture = false; hdrFrames.removeAll()
             processedPhoto = nil; processingError = nil
             setTorch(false)
             DispatchQueue.main.async { self.onRecording?(false) }
@@ -598,8 +646,9 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
         refreshOrientation()
         let ready = configured && visible && session.isRunning && !interrupted
         let busy = self.busy, front = input?.device.position == .front
+        let hdr = hdrSupported
         let flash = mode == .photo ? input?.device.hasFlash == true : (mode == .video && input?.device.hasTorch == true)
-        DispatchQueue.main.async { self.onState?(ready, busy, front, flash) }
+        DispatchQueue.main.async { self.onState?(ready, busy, front, flash); self.onHDR?(hdr) }
     }
 
     private func report(_ message: String) { DispatchQueue.main.async { self.onError?(message) } }

@@ -12,6 +12,13 @@ final class CameraViewController: UIViewController {
     private let resetZoomButton = UIButton(type: .system)
     private var photoOptions = PhotoOptions()
     private var previewAspect: NSLayoutConstraint?
+    private var previewHeightLimit: NSLayoutConstraint?
+    private var photoPreviewCenter: NSLayoutConstraint?
+    private var videoPreviewCenter: NSLayoutConstraint?
+    private var adjustmentBottom: NSLayoutConstraint?
+    private var hdrRequested = false
+    private var hdrAvailable = false
+    private let hdrButton = UIButton(type: .system)
     private var zoomLimit: CGFloat = 4
     private var irisRequested = false
     private var nativeLive = false
@@ -48,6 +55,9 @@ final class CameraViewController: UIViewController {
         buildUI()
         preview.previewLayer.session = engine.session
         preview.previewLayer.videoGravity = .resizeAspectFill
+        engine.onHDR = { [weak self] available in
+            self?.hdrAvailable = available; self?.updateControls()
+        }
         engine.onLiveBackend = { [weak self] native, diagnostic in
             guard let self = self else { return }
             self.nativeLive = native; self.liveDiagnostic = diagnostic
@@ -147,7 +157,11 @@ final class CameraViewController: UIViewController {
         cameraVisible = false; modeRequest += 1; cancelCountdown(); engine.setVisible(false)
     }
 
-    override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); updatePreview() }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        adjustmentBottom?.constant = mode == .video ? -(123 + view.safeAreaInsets.bottom) : 0
+        updatePreview()
+    }
 
     private func buildUI() {
         view.backgroundColor = .black
@@ -161,17 +175,16 @@ final class CameraViewController: UIViewController {
             grid.leadingAnchor.constraint(equalTo: preview.leadingAnchor), grid.trailingAnchor.constraint(equalTo: preview.trailingAnchor),
             grid.topAnchor.constraint(equalTo: preview.topAnchor), grid.bottomAnchor.constraint(equalTo: preview.bottomAnchor)
         ])
-        let top = UIStackView(arrangedSubviews: [gridButton, timerButton, flashButton, mirrorButton])
+        let top = UIStackView(arrangedSubviews: [flashButton, hdrButton, timerButton, gridButton, mirrorButton])
         top.axis = .horizontal; top.distribution = .fillEqually; top.spacing = 4
         top.backgroundColor = .clear
-        let topBackdrop = UIView(); topBackdrop.backgroundColor = UIColor.black.withAlphaComponent(0.55)
-        topBackdrop.layer.cornerRadius = 16
+        let topBackdrop = UIView(); topBackdrop.backgroundColor = .black
         topBackdrop.translatesAutoresizingMaskIntoConstraints = false; top.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(topBackdrop); topBackdrop.addSubview(top)
         NSLayoutConstraint.activate([
-            topBackdrop.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
-            topBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            topBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12), topBackdrop.heightAnchor.constraint(equalToConstant: 88),
+            topBackdrop.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            topBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor), topBackdrop.heightAnchor.constraint(equalToConstant: 44),
             top.leadingAnchor.constraint(equalTo: topBackdrop.leadingAnchor, constant: 4), top.trailingAnchor.constraint(equalTo: topBackdrop.trailingAnchor, constant: -4),
             top.topAnchor.constraint(equalTo: topBackdrop.topAnchor), top.heightAnchor.constraint(equalToConstant: 44)
         ])
@@ -188,37 +201,49 @@ final class CameraViewController: UIViewController {
         zoomSlider.addTarget(self, action: #selector(slideZoom), for: .valueChanged)
         let adjustments = UIStackView(arrangedSubviews: [frameButton, zoomSlider, resetZoomButton])
         adjustments.axis = .horizontal; adjustments.spacing = 12; adjustments.translatesAutoresizingMaskIntoConstraints = false
-        topBackdrop.addSubview(adjustments)
+        let adjustmentBackdrop = UIView(); adjustmentBackdrop.backgroundColor = UIColor.black.withAlphaComponent(0.35)
+        adjustmentBackdrop.translatesAutoresizingMaskIntoConstraints = false
+        preview.addSubview(adjustmentBackdrop); adjustmentBackdrop.addSubview(adjustments)
         NSLayoutConstraint.activate([
-            adjustments.leadingAnchor.constraint(equalTo: topBackdrop.leadingAnchor, constant: 12),
-            adjustments.trailingAnchor.constraint(equalTo: topBackdrop.trailingAnchor, constant: -12),
-            adjustments.topAnchor.constraint(equalTo: top.bottomAnchor), adjustments.bottomAnchor.constraint(equalTo: topBackdrop.bottomAnchor),
+            adjustmentBackdrop.leadingAnchor.constraint(equalTo: preview.leadingAnchor), adjustmentBackdrop.trailingAnchor.constraint(equalTo: preview.trailingAnchor),
+            adjustmentBackdrop.heightAnchor.constraint(equalToConstant: 36),
+            adjustments.leadingAnchor.constraint(equalTo: adjustmentBackdrop.leadingAnchor, constant: 12),
+            adjustments.trailingAnchor.constraint(equalTo: adjustmentBackdrop.trailingAnchor, constant: -12),
+            adjustments.topAnchor.constraint(equalTo: adjustmentBackdrop.topAnchor), adjustments.bottomAnchor.constraint(equalTo: adjustmentBackdrop.bottomAnchor),
             frameButton.widthAnchor.constraint(equalToConstant: 96), resetZoomButton.widthAnchor.constraint(equalToConstant: 44)
         ])
-        for button in [gridButton, timerButton, flashButton, mirrorButton] {
-            button.tintColor = .white; button.titleLabel?.font = .systemFont(ofSize: 12, weight: .semibold)
+        adjustmentBottom = adjustmentBackdrop.bottomAnchor.constraint(equalTo: preview.bottomAnchor)
+        adjustmentBottom?.isActive = true
+        for button in [gridButton, timerButton, flashButton, hdrButton, mirrorButton] {
+            button.tintColor = .white; button.titleLabel?.font = .systemFont(ofSize: 11, weight: .semibold)
         }
         gridButton.setTitle("Grid Off", for: .normal); timerButton.setTitle("Timer Off", for: .normal)
         flashButton.setTitle("Flash Off", for: .normal); mirrorButton.setTitle("Mirror On", for: .normal)
+        hdrButton.setTitle("HDR Off", for: .normal); hdrButton.accessibilityLabel = "Three-exposure HDR"
+        hdrButton.addTarget(self, action: #selector(toggleHDR), for: .touchUpInside)
         gridButton.addTarget(self, action: #selector(toggleGrid), for: .touchUpInside)
         timerButton.addTarget(self, action: #selector(cycleTimer), for: .touchUpInside)
         flashButton.addTarget(self, action: #selector(cycleFlash), for: .touchUpInside)
         mirrorButton.addTarget(self, action: #selector(toggleMirror), for: .touchUpInside)
         mirrorButton.accessibilityLabel = "Save front camera photos and videos mirrored"
 
-        let bottom = UIView(); bottom.backgroundColor = UIColor.black.withAlphaComponent(0.78)
+        let bottom = UIView(); bottom.backgroundColor = .black
         bottom.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(bottom)
         NSLayoutConstraint.activate([
             bottom.leadingAnchor.constraint(equalTo: view.leadingAnchor), bottom.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            bottom.bottomAnchor.constraint(equalTo: view.bottomAnchor), bottom.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -180)
+            bottom.bottomAnchor.constraint(equalTo: view.bottomAnchor), bottom.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -123)
         ])
         let frameArea = UILayoutGuide(); view.addLayoutGuide(frameArea)
         NSLayoutConstraint.activate([
             frameArea.leadingAnchor.constraint(equalTo: view.leadingAnchor), frameArea.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            frameArea.topAnchor.constraint(equalTo: topBackdrop.bottomAnchor, constant: 8), frameArea.bottomAnchor.constraint(equalTo: bottom.topAnchor, constant: -8),
-            preview.centerXAnchor.constraint(equalTo: frameArea.centerXAnchor), preview.centerYAnchor.constraint(equalTo: frameArea.centerYAnchor),
-            preview.widthAnchor.constraint(lessThanOrEqualTo: frameArea.widthAnchor), preview.heightAnchor.constraint(lessThanOrEqualTo: frameArea.heightAnchor)
+            frameArea.topAnchor.constraint(equalTo: topBackdrop.bottomAnchor), frameArea.bottomAnchor.constraint(equalTo: bottom.topAnchor),
+            preview.centerXAnchor.constraint(equalTo: frameArea.centerXAnchor),
+            preview.widthAnchor.constraint(lessThanOrEqualTo: frameArea.widthAnchor)
         ])
+        previewHeightLimit = preview.heightAnchor.constraint(lessThanOrEqualTo: frameArea.heightAnchor)
+        photoPreviewCenter = preview.centerYAnchor.constraint(equalTo: frameArea.centerYAnchor)
+        videoPreviewCenter = preview.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        // On iPhone 6: 375 × 667 points = 44 controls + 375 × 500 preview + 123 shutter area.
         let fitWidth = preview.widthAnchor.constraint(equalTo: frameArea.widthAnchor); fitWidth.priority = .defaultHigh; fitWidth.isActive = true
         updateFrame()
         modes.selectedSegmentIndex = 0; modes.tintColor = accent
@@ -234,21 +259,22 @@ final class CameraViewController: UIViewController {
         switchButton.setTitle("↻", for: .normal); switchButton.titleLabel?.font = .systemFont(ofSize: 36, weight: .light)
         switchButton.tintColor = .white; switchButton.accessibilityLabel = "Switch front and back cameras"
         switchButton.addTarget(self, action: #selector(switchCamera), for: .touchUpInside)
-        status.textColor = .white; status.textAlignment = .center; status.numberOfLines = 2
-        status.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        status.textColor = .white; status.textAlignment = .center; status.numberOfLines = 1
+        status.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        status.adjustsFontSizeToFitWidth = true; status.minimumScaleFactor = 0.8
         for child in [modes, shutter, galleryButton, switchButton, status] {
             child.translatesAutoresizingMaskIntoConstraints = false; bottom.addSubview(child)
         }
         NSLayoutConstraint.activate([
-            modes.topAnchor.constraint(equalTo: bottom.topAnchor, constant: 14), modes.centerXAnchor.constraint(equalTo: bottom.centerXAnchor),
-            modes.widthAnchor.constraint(equalTo: bottom.widthAnchor, multiplier: 0.76), modes.heightAnchor.constraint(equalToConstant: 32),
-            shutter.centerXAnchor.constraint(equalTo: bottom.centerXAnchor), shutter.topAnchor.constraint(equalTo: modes.bottomAnchor, constant: 14),
-            shutter.widthAnchor.constraint(equalToConstant: 78), shutter.heightAnchor.constraint(equalTo: shutter.widthAnchor),
+            modes.topAnchor.constraint(equalTo: bottom.topAnchor, constant: 6), modes.centerXAnchor.constraint(equalTo: bottom.centerXAnchor),
+            modes.widthAnchor.constraint(equalTo: bottom.widthAnchor, multiplier: 0.76), modes.heightAnchor.constraint(equalToConstant: 24),
+            shutter.centerXAnchor.constraint(equalTo: bottom.centerXAnchor), shutter.topAnchor.constraint(equalTo: modes.bottomAnchor, constant: 6),
+            shutter.widthAnchor.constraint(equalToConstant: 70), shutter.heightAnchor.constraint(equalTo: shutter.widthAnchor),
             galleryButton.centerYAnchor.constraint(equalTo: shutter.centerYAnchor), galleryButton.leadingAnchor.constraint(equalTo: bottom.leadingAnchor, constant: 28),
             galleryButton.widthAnchor.constraint(equalToConstant: 50), galleryButton.heightAnchor.constraint(equalToConstant: 50),
             switchButton.centerYAnchor.constraint(equalTo: shutter.centerYAnchor), switchButton.trailingAnchor.constraint(equalTo: bottom.trailingAnchor, constant: -28),
             switchButton.widthAnchor.constraint(equalToConstant: 50), switchButton.heightAnchor.constraint(equalToConstant: 50),
-            status.topAnchor.constraint(equalTo: shutter.bottomAnchor, constant: 6), status.leadingAnchor.constraint(equalTo: bottom.leadingAnchor, constant: 12),
+            status.topAnchor.constraint(equalTo: shutter.bottomAnchor, constant: 2), status.leadingAnchor.constraint(equalTo: bottom.leadingAnchor, constant: 12),
             status.trailingAnchor.constraint(equalTo: bottom.trailingAnchor, constant: -12), status.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -4)
         ])
         countdownLabel.textColor = .white; countdownLabel.font = .systemFont(ofSize: 88, weight: .thin)
@@ -304,6 +330,11 @@ final class CameraViewController: UIViewController {
         shutter.alpha = shutter.isEnabled ? 1 : 0.45
         modes.isEnabled = idle; switchButton.isEnabled = idle
         mirrorButton.isEnabled = idle && front; flashButton.isEnabled = idle && flashAvailable
+        hdrButton.isEnabled = idle && mode == .photo && hdrAvailable
+        hdrButton.setTitle(hdrRequested ? "HDR On" : "HDR Off", for: .normal)
+        hdrButton.tintColor = hdrRequested && mode == .photo ? accent : .white
+        hdrButton.alpha = hdrButton.isEnabled ? 1 : 0.4
+        flashButton.isEnabled = flashButton.isEnabled && !(hdrRequested && mode == .photo && hdrAvailable)
         timerButton.isEnabled = idle; galleryButton.isEnabled = !busy && !saving && !countdown && !modeSwitchPending
         frameButton.isEnabled = idle && mode != .video
         resetZoomButton.isEnabled = idle; zoomSlider.isEnabled = idle && zoomLimit > 1
@@ -320,7 +351,7 @@ final class CameraViewController: UIViewController {
         } else {
             status.textColor = .white
             if saving { status.text = "Saving capture…" }
-            else if busy { status.text = mode == .motion ? "Hold steady · capturing Live Photo…" : "Processing…" }
+            else if busy { status.text = mode == .motion ? "Hold steady · capturing Live Photo…" : (mode == .photo && hdrRequested && hdrAvailable ? "Hold steady · capturing HDR…" : "Processing…") }
             else if !ready { status.text = "Camera unavailable" }
             else if mode == .motion && nativeLive { status.text = "Iris12 experiment · native LIVE ready" }
             else if mode == .motion { status.text = motionReady ? "LIVE ready · 1.5s before + after" : "LIVE warming up · wait for full pre-roll" }
@@ -343,6 +374,14 @@ final class CameraViewController: UIViewController {
     }
     @objc private func toggleMirror() {
         mirrored.toggle(); mirrorButton.setTitle(mirrored ? "Mirror On" : "Mirror Off", for: .normal); engine.setMirror(mirrored)
+    }
+    @objc private func toggleHDR() {
+        hdrRequested.toggle(); engine.setHDR(hdrRequested)
+        if hdrRequested {
+            flash = .off; flashButton.setTitle("Flash Off", for: .normal); engine.setFlash(.off)
+            showMessage("HDR combines three exposures. Hold still for the best result. HDR photos are limited to a 1600-pixel long edge to keep processing light on iPhone 6. Flash is off during HDR.")
+        }
+        updateControls()
     }
     @objc private func switchCamera() { zoom = 1; engine.switchCamera() }
 
@@ -396,6 +435,9 @@ final class CameraViewController: UIViewController {
 
     private func updateFrame() {
         previewAspect?.isActive = false
+        previewHeightLimit?.isActive = mode != .video
+        photoPreviewCenter?.isActive = mode != .video
+        videoPreviewCenter?.isActive = mode == .video
         let aspect: PhotoAspect = mode == .video ? .wide : photoOptions.aspect
         previewAspect = preview.widthAnchor.constraint(equalTo: preview.heightAnchor, multiplier: aspect.portraitRatio)
         previewAspect?.isActive = true

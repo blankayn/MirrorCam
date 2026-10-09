@@ -150,4 +150,66 @@ for aspect in PhotoAspect.allCases {
     while !loaded && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
     check(loaded && liveValid, "PhotoKit recognizes \(aspect.title) resources as one Live Photo")
 }
+// Exercise the actual three-exposure HDR merger, including clipping and mirrored metadata.
+func hdrFixture(bias: Float, orientation: Int = 1, width: Int = 320, height: Int = 240, shift: Int = 0) -> Data {
+    let bitmap = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+        space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
+    let pixels = bitmap.data!.assumingMemoryBound(to: UInt8.self)
+    let exposure = pow(2.0, Double(bias))
+    for y in 0..<height {
+        for x in 0..<width {
+            let sourceX = max(0, min(width - 1, x - shift))
+            let band = min(3, sourceX * 4 / width)
+            let base = [0.008, 0.12, 1.8, 3.0][band]
+            let texture = (sourceX / 13 + y / 11) % 2 == 0 ? 1.0 : 0.92
+            let value = UInt8(pow(min(1, base * texture * exposure), 1 / 2.2) * 255)
+            let index = (y * width + x) * 4
+            pixels[index] = value; pixels[index + 1] = value; pixels[index + 2] = value; pixels[index + 3] = 255
+        }
+    }
+    let data = NSMutableData()
+    let destination = CGImageDestinationCreateWithData(data, kUTTypeJPEG, 1, nil)!
+    CGImageDestinationAddImage(destination, bitmap.makeImage()!, [kCGImagePropertyOrientation: orientation,
+        kCGImageDestinationLossyCompressionQuality: 1.0] as CFDictionary)
+    check(CGImageDestinationFinalize(destination), "HDR fixture JPEG encoded")
+    return data as Data
+}
+
+func hdrPixel(_ data: Data, xFraction: Double) -> Int {
+    let image = CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithData(data as CFData, nil)!, 0, nil)!
+    let bitmap = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+        space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
+    bitmap.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    return Int(bitmap.data!.assumingMemoryBound(to: UInt8.self)[(image.height / 2 * image.width + Int(Double(image.width) * xFraction)) * 4])
+}
+
+let hdrFrames = [-1.5, 0, 1.5].map { bias -> HDRFrame in
+    let data = hdrFixture(bias: Float(bias))
+    return HDRFrame(data: data, bias: Float(bias), metadata: [kCGImagePropertyExifDictionary as String:
+        [kCGImagePropertyExifExposureTime as String: 0.01 * pow(2, bias), kCGImagePropertyExifISOSpeedRatings as String: [100], kCGImagePropertyExifFNumber as String: 2.0]])
+}
+check(abs(hdrFrames[0].exposure! / hdrFrames[1].exposure! - pow(2, -1.5)) < 0.00001, "HDR uses actual EXIF exposure ratios")
+let hdrData = try HDRProcessor.merge(hdrFrames, options: PhotoOptions())
+let middleData = hdrFrames[1].data
+check(hdrPixel(middleData, xFraction: 0.875) == hdrPixel(middleData, xFraction: 0.625), "Reference photo loses detail in clipped highlights")
+check(hdrPixel(hdrData, xFraction: 0.875) > hdrPixel(hdrData, xFraction: 0.625) + 5, "HDR recovers detail from darker exposure in clipped highlights")
+check(hdrPixel(hdrData, xFraction: 0.125) > hdrPixel(middleData, xFraction: 0.125), "HDR tone mapping lifts shadow detail")
+for aspect in PhotoAspect.allCases {
+    let data = try HDRProcessor.merge(hdrFrames, options: PhotoOptions(aspect: aspect, resolution: .maximum))
+    let image = CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithData(data as CFData, nil)!, 0, nil)!
+    let crop = FrameGeometry.crop(CGSize(width: 320, height: 240), aspect: aspect)
+    let size = FrameGeometry.outputSize(crop.size, maxEdge: nil)
+    check(CGSize(width: image.width, height: image.height) == size, "HDR preserves selected framing without added zoom")
+}
+let mirrorFrames = [-1.5, 0, 1.5].map { HDRFrame(data: hdrFixture(bias: Float($0), orientation: 2), bias: Float($0)) }
+let mirroredHDR = try HDRProcessor.merge(mirrorFrames, options: PhotoOptions())
+check(hdrPixel(mirroredHDR, xFraction: 0.125) > hdrPixel(mirroredHDR, xFraction: 0.875) + 80, "HDR normalizes mirrored JPEG orientation")
+do {
+    _ = try HDRProcessor.merge(Array(hdrFrames.prefix(2)), options: PhotoOptions())
+    fatalError("HDR accepted an incomplete bracket")
+} catch { check(true, "Incomplete HDR brackets reject for regular-photo fallback") }
+let oversized = [-1.5, 0, 1.5].map { HDRFrame(data: hdrFixture(bias: Float($0), width: 1800, height: 1350), bias: Float($0)) }
+let limitedHDR = try HDRProcessor.merge(oversized, options: PhotoOptions())
+let limitedImage = CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithData(limitedHDR as CFData, nil)!, 0, nil)!
+check(limitedImage.width == 1600 && limitedImage.height == 1200, "HDR decode and output are bounded to 1600 pixels")
 print("Synthetic media checks passed; iPhone 6 camera and Photos-library tests remain required.")
