@@ -1,7 +1,11 @@
-import UIKit
+import Foundation
 import CoreImage
 import ImageIO
+#if canImport(MobileCoreServices)
 import MobileCoreServices
+#else
+import CoreServices
+#endif
 
 enum PhotoFraming {
     private static let context = CIContext(options: [.cacheIntermediates: false])

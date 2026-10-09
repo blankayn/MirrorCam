@@ -52,6 +52,39 @@ check(rolling.video.count <= 25 && rolling.span <= 1.5, "Rolling buffer is bound
 check(rolling.span > 1.3, "Rolling buffer retains the lead-in")
 let work = DispatchQueue(label: "MirrorCam.media-check")
 
+let referenceSize = CGSize(width: 1200, height: 1600)
+let referenceContext = CGContext(data: nil, width: 1200, height: 1600, bitsPerComponent: 8, bytesPerRow: 0,
+    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+referenceContext.setFillColor(NSColor.red.cgColor); referenceContext.fill(CGRect(x: 0, y: 0, width: 600, height: 1600))
+referenceContext.setFillColor(NSColor.blue.cgColor); referenceContext.fill(CGRect(x: 600, y: 0, width: 600, height: 1600))
+let referenceImage = referenceContext.makeImage()!
+for orientation in [1, 2, 6, 8] {
+    let original = NSMutableData()
+    let jpeg = CGImageDestinationCreateWithData(original, kUTTypeJPEG, 1, nil)!
+    CGImageDestinationAddImage(jpeg, referenceImage, [kCGImagePropertyOrientation as String: orientation] as CFDictionary)
+    check(CGImageDestinationFinalize(jpeg), "Reference JPEG generated")
+    for aspect in PhotoAspect.allCases {
+        for resolution in PhotoResolution.allCases {
+            let data = try PhotoFraming.process(original as Data, options: PhotoOptions(aspect: aspect, resolution: resolution))
+            let source = CGImageSourceCreateWithData(data as CFData, nil)!
+            let image = CGImageSourceCreateImageAtIndex(source, 0, nil)!
+            let sourceSize = orientation >= 5 ? CGSize(width: 1600, height: 1200) : referenceSize
+            let expected = FrameGeometry.outputSize(FrameGeometry.crop(sourceSize, aspect: aspect).size, maxEdge: resolution.maxEdge)
+            check(CGSize(width: image.width, height: image.height) == expected, "Processed JPEG framing, resolution and orientation \(orientation)")
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)! as NSDictionary
+            check((properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue == 1, "Saved JPEG pixels are upright")
+            if orientation == 2 && aspect == .full && resolution == .maximum {
+                let bitmap = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
+                bitmap.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+                let bytes = bitmap.data!.assumingMemoryBound(to: UInt8.self)
+                let offset = (image.height / 2 * image.width + image.width / 4) * 4
+                check(bytes[offset + 2] > bytes[offset] + 50, "Mirrored JPEG metadata is normalized into mirrored pixels")
+            }
+        }
+    }
+}
+
 for aspect in PhotoAspect.allCases {
     let movie = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/check-\(aspect.rawValue).mov")
     try? FileManager.default.removeItem(at: movie)
@@ -89,14 +122,24 @@ for aspect in PhotoAspect.allCases {
     check(abs(actualMarker - 22.0 / 15.0) < 0.01, "Key-photo timing is relative to the clip start")
     reader.cancelReading()
 
-    // Create the same JPEG pairing tag as PhotoFraming, then let PhotoKit validate the resource pair.
+    // Use the app's actual key-photo encoder, then let PhotoKit validate the resource pair.
     let photo = movie.deletingPathExtension().appendingPathExtension("jpg")
-    let context = CGContext(data: nil, width: Int(expectedSize.width), height: Int(expectedSize.height), bitsPerComponent: 8,
-        bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
-    context.setFillColor(NSColor.green.cgColor); context.fill(CGRect(origin: .zero, size: expectedSize))
-    let destination = CGImageDestinationCreateWithURL(photo as CFURL, kUTTypeJPEG, 1, nil)!
-    CGImageDestinationAddImage(destination, context.makeImage()!, [kCGImagePropertyMakerAppleDictionary as String: ["17": id]] as CFDictionary)
-    check(CGImageDestinationFinalize(destination), "JPEG pairing metadata written")
+    let options = PhotoOptions(aspect: aspect, resolution: .maximum)
+    let photoData = try PhotoFraming.still(CMSampleBufferGetImageBuffer(samples[22])!, options: options, identifier: id)
+    try photoData.write(to: photo)
+    let imageSource = CGImageSourceCreateWithData(photoData as CFData, nil)!
+    let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil)! as NSDictionary
+    let maker = properties[kCGImagePropertyMakerAppleDictionary] as! NSDictionary
+    check(maker["17"] as? String == id, "JPEG and MOV share the pairing identifier")
+    let encodedImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)!
+    check(CGSize(width: encodedImage.width, height: encodedImage.height) == expectedSize, "LIVE key photo uses the same frame as its video")
+    for resolution in PhotoResolution.allCases {
+        let data = try PhotoFraming.process(photoData, options: PhotoOptions(aspect: aspect, resolution: resolution))
+        let source = CGImageSourceCreateWithData(data as CFData, nil)!
+        let image = CGImageSourceCreateImageAtIndex(source, 0, nil)!
+        let expected = FrameGeometry.outputSize(expectedSize, maxEdge: resolution.maxEdge)
+        check(CGSize(width: image.width, height: image.height) == expected, "Photo resolution changes preserve framing and do not upscale")
+    }
     var loaded = false, liveValid = false
     _ = PHLivePhoto.request(withResourceFileURLs: [photo, movie], placeholderImage: nil, targetSize: CGSize(width: 240, height: 320), contentMode: .aspectFit) { livePhoto, info in
         guard !(info[PHLivePhotoInfoIsDegradedKey] as? Bool ?? false) else { return }
