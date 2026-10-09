@@ -95,8 +95,7 @@ final class ClipWriter {
             marker.key = "com.apple.quicktime.still-image-time" as NSString
             marker.value = NSNumber(value: Int8(0))
             marker.dataType = "com.apple.metadata.datatype.int8"
-            // Metadata adaptor timestamps use the movie timeline, unlike source sample timestamps.
-            stillMarker = AVTimedMetadataGroup(items: [marker], timeRange: CMTimeRange(start: CMTimeSubtract(stillTime, start), duration: CMTime(value: 1, timescale: 15)))
+            stillMarker = AVTimedMetadataGroup(items: [marker], timeRange: CMTimeRange(start: stillTime, duration: CMTime(value: 1, timescale: 15)))
         } else { metadata = nil }
         guard writer.startWriting() else { throw writer.error ?? CameraError.message("Cannot start recording.") }
         writer.startSession(atSourceTime: start)

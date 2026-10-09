@@ -46,10 +46,6 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         run: python3 scripts/validate-project.py
 
-      - name: Check framing and Live Photo resources
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: bash scripts/run-media-checks.sh
-
       - name: Build unsigned arm64 IPA
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
@@ -57,6 +53,10 @@ jobs:
           set -o pipefail
           mkdir -p build
           bash scripts/build-ipa.sh sideload 2>&1 | tee build/xcodebuild.log
+
+      - name: Check framing and Live Photo resources
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: bash scripts/run-media-checks.sh
 
       - name: Upload IPA for Sideloadly
         uses: actions/upload-artifact@v4

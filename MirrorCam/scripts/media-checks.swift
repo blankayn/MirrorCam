@@ -77,9 +77,14 @@ for aspect in PhotoAspect.allCases {
     let metadataTrack = asset.tracks(withMediaType: .metadata).first!
     let reader = try AVAssetReader(asset: asset)
     let output = AVAssetReaderTrackOutput(track: metadataTrack, outputSettings: nil)
+    let adaptor = AVAssetReaderOutputMetadataAdaptor(assetReaderTrackOutput: output)
     reader.add(output); check(reader.startReading(), "Timed metadata reader starts")
-    let timingSample = output.copyNextSampleBuffer()!
-    let actualMarker = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(timingSample))
+    var foundMarker: CMTime?
+    while let group = adaptor.nextTimedMetadataGroup() {
+        if group.items.contains(where: { $0.key as? String == "com.apple.quicktime.still-image-time" }) { foundMarker = group.timeRange.start; break }
+    }
+    check(foundMarker != nil, "Key-photo metadata is readable")
+    let actualMarker = CMTimeGetSeconds(foundMarker!)
     print("Key photo time: \(actualMarker), expected \(22.0 / 15.0)"); fflush(stdout)
     check(abs(actualMarker - 22.0 / 15.0) < 0.01, "Key-photo timing is relative to the clip start")
     reader.cancelReading()
