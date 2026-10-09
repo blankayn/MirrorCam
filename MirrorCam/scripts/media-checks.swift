@@ -151,7 +151,7 @@ for aspect in PhotoAspect.allCases {
     check(loaded && liveValid, "PhotoKit recognizes \(aspect.title) resources as one Live Photo")
 }
 // Exercise the actual three-exposure HDR merger, including clipping and mirrored metadata.
-func hdrFixture(bias: Float, orientation: Int = 1, width: Int = 320, height: Int = 240, shift: Int = 0) -> Data {
+func hdrFixture(bias: Float, orientation: Int = 1, width: Int = 320, height: Int = 240, shift: Int = 0, verticalShift: Int = 0) -> Data {
     let bitmap = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
         space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
     let pixels = bitmap.data!.assumingMemoryBound(to: UInt8.self)
@@ -159,10 +159,11 @@ func hdrFixture(bias: Float, orientation: Int = 1, width: Int = 320, height: Int
     for y in 0..<height {
         for x in 0..<width {
             let sourceX = max(0, min(width - 1, x - shift))
+            let sourceY = max(0, min(height - 1, y - verticalShift))
             let band = min(3, sourceX * 4 / width)
             let base = [0.008, 0.12, 1.8, 3.0][band]
             // Asymmetric detail avoids the many equivalent shifts of a periodic checkerboard.
-            let hash = ((sourceX / 13 * 73856093) ^ (y / 11 * 19349663)) & 255
+            let hash = ((sourceX / 13 * 73856093) ^ (sourceY / 11 * 19349663)) & 255
             let texture = 0.76 + 0.24 * Double(hash) / 255
             let value = UInt8(pow(min(1, base * texture * exposure), 1 / 2.2) * 255)
             let index = (y * width + x) * 4
@@ -177,12 +178,12 @@ func hdrFixture(bias: Float, orientation: Int = 1, width: Int = 320, height: Int
     return data as Data
 }
 
-func hdrPixel(_ data: Data, xFraction: Double) -> Int {
+func hdrPixel(_ data: Data, xFraction: Double, yFraction: Double = 0.5) -> Int {
     let image = CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithData(data as CFData, nil)!, 0, nil)!
     let bitmap = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
         space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
     bitmap.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
-    return Int(bitmap.data!.assumingMemoryBound(to: UInt8.self)[(image.height / 2 * image.width + Int(Double(image.width) * xFraction)) * 4])
+    return Int(bitmap.data!.assumingMemoryBound(to: UInt8.self)[(Int(Double(image.height) * yFraction) * image.width + Int(Double(image.width) * xFraction)) * 4])
 }
 
 let hdrFrames = [-1.5, 0, 1.5].map { bias -> HDRFrame in
@@ -196,10 +197,13 @@ let middleData = hdrFrames[1].data
 check(hdrPixel(middleData, xFraction: 0.875) == hdrPixel(middleData, xFraction: 0.625), "Reference photo loses detail in clipped highlights")
 check(hdrPixel(hdrData, xFraction: 0.875) > hdrPixel(hdrData, xFraction: 0.625) + 5, "HDR recovers detail from darker exposure in clipped highlights")
 check(hdrPixel(hdrData, xFraction: 0.125) > hdrPixel(middleData, xFraction: 0.125), "HDR tone mapping lifts shadow detail")
-let translatedFrames = [HDRFrame(data: hdrFixture(bias: -1.5, shift: 8), bias: -1.5), hdrFrames[1], hdrFrames[2]]
+let translatedFrames = [HDRFrame(data: hdrFixture(bias: -1.5, shift: 8, verticalShift: 8), bias: -1.5), hdrFrames[1], hdrFrames[2]]
 let translatedHDR = try HDRProcessor.merge(translatedFrames, options: PhotoOptions())
 check(abs(hdrPixel(translatedHDR, xFraction: 0.7625) - hdrPixel(hdrData, xFraction: 0.7625)) < 6,
     "HDR translation aligns the outer exposure to the center frame")
+check([0.3375, 0.525, 0.775].allSatisfy {
+    abs(hdrPixel(translatedHDR, xFraction: 0.625, yFraction: $0) - hdrPixel(hdrData, xFraction: 0.625, yFraction: $0)) < 5
+}, "HDR vertical translation uses the correct Core Image direction")
 for aspect in PhotoAspect.allCases {
     let data = try HDRProcessor.merge(hdrFrames, options: PhotoOptions(aspect: aspect, resolution: .maximum))
     let image = CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithData(data as CFData, nil)!, 0, nil)!
