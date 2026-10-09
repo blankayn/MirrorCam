@@ -3,7 +3,7 @@ import Photos
 import AVFoundation
 import ImageIO
 
-enum MediaKind: String, Codable { case photo, video, motion }
+enum MediaKind: String, Codable { case photo, video, motion, livePhoto }
 
 struct MediaItem: Codable {
     let id: String
@@ -12,7 +12,7 @@ struct MediaItem: Codable {
     var savedToPhotos: Bool
     var directory: URL { return MediaStore.root.appendingPathComponent(id, isDirectory: true) }
     var photoURL: URL? { return kind == .video ? nil : directory.appendingPathComponent("photo.jpg") }
-    var videoURL: URL? { return kind == .photo ? nil : directory.appendingPathComponent("video.mp4") }
+    var videoURL: URL? { return kind == .photo ? nil : directory.appendingPathComponent(kind == .livePhoto ? "video.mov" : "video.mp4") }
     var thumbnailURL: URL { return directory.appendingPathComponent("thumbnail.jpg") }
 }
 
@@ -39,7 +39,7 @@ final class MediaStore {
 
     func add(photo: Data?, video: URL?, mode: CaptureMode, completion: @escaping (Result<MediaItem, Error>) -> Void) {
         queue.async {
-            let kind: MediaKind = mode == .photo ? .photo : (mode == .video ? .video : .motion)
+            let kind: MediaKind = mode == .photo ? .photo : (mode == .video ? .video : .livePhoto)
             let item = MediaItem(id: UUID().uuidString, created: Date(), kind: kind, savedToPhotos: false)
             do {
                 try FileManager.default.createDirectory(at: item.directory, withIntermediateDirectories: true, attributes: nil)
@@ -84,7 +84,7 @@ final class MediaStore {
         }
     }
 
-    func saveToPhotos(_ item: MediaItem, completion: @escaping (Result<MediaItem, Error>) -> Void) {
+    func saveToPhotos(_ item: MediaItem, separate: Bool = false, completion: @escaping (Result<MediaItem, Error>) -> Void) {
         if item.savedToPhotos { completion(.success(item)); return }
         func save(_ status: PHAuthorizationStatus) {
             var allowed = status == .authorized
@@ -94,6 +94,13 @@ final class MediaStore {
                 return
             }
             PHPhotoLibrary.shared().performChanges({
+                if item.kind == .livePhoto && !separate, let photo = item.photoURL, let video = item.videoURL {
+                    let request = PHAssetCreationRequest.forAsset()
+                    request.creationDate = item.created
+                    request.addResource(with: .photo, fileURL: photo, options: nil)
+                    request.addResource(with: .pairedVideo, fileURL: video, options: nil)
+                    return
+                }
                 if let url = item.photoURL {
                     let request = PHAssetCreationRequest.forAsset()
                     request.creationDate = item.created
@@ -112,7 +119,10 @@ final class MediaStore {
                         try? self.write(updated)
                         DispatchQueue.main.async { completion(.success(updated)) }
                     } else {
-                        DispatchQueue.main.async { completion(.failure(error ?? CameraError.message("Could not save to Photos. Try again."))) }
+                        let message = item.kind == .livePhoto && !separate
+                            ? "Photos could not import this Live Photo. Your capture is still in MirrorCam. Try again, or use Save photo + video. \(error?.localizedDescription ?? "")"
+                            : (error?.localizedDescription ?? "Could not save to Photos. Try again.")
+                        DispatchQueue.main.async { completion(.failure(CameraError.message(message))) }
                     }
                 }
             })

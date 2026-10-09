@@ -1,5 +1,6 @@
 import UIKit
 import AVKit
+import PhotosUI
 
 final class GalleryViewController: UITableViewController {
     private var items: [MediaItem] = []
@@ -37,7 +38,7 @@ final class GalleryViewController: UITableViewController {
         let cell = tableView.dequeueReusableCell(withIdentifier: "media") ?? UITableViewCell(style: .subtitle, reuseIdentifier: "media")
         let item = items[indexPath.row]
         cell.backgroundColor = .black; cell.textLabel?.textColor = .white; cell.detailTextLabel?.textColor = .lightGray
-        cell.textLabel?.text = item.kind == .motion ? "Motion photo + clip" : item.kind.rawValue.capitalized
+        cell.textLabel?.text = item.kind == .livePhoto ? "LIVE Photo" : (item.kind == .motion ? "Motion photo + clip" : item.kind.rawValue.capitalized)
         cell.detailTextLabel?.text = formatter.string(from: item.created) + (item.savedToPhotos ? " · In Photos" : " · Local")
         cell.imageView?.image = UIImage(contentsOfFile: item.thumbnailURL.path)
         cell.imageView?.contentMode = .scaleAspectFit
@@ -66,6 +67,9 @@ final class GalleryViewController: UITableViewController {
 final class MediaDetailViewController: UIViewController {
     private var item: MediaItem
     private let imageView = UIImageView()
+    private let liveView = PHLivePhotoView()
+    private let separateButton = UIButton(type: .system)
+    private var liveRequest: PHLivePhotoRequestID?
     private let saveButton = UIButton(type: .system)
     private let playButton = UIButton(type: .system)
     private let shareButton = UIButton(type: .system)
@@ -76,24 +80,35 @@ final class MediaDetailViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = item.kind == .motion ? "Motion" : item.kind.rawValue.capitalized
+        title = item.kind == .livePhoto ? "LIVE Photo" : (item.kind == .motion ? "Motion" : item.kind.rawValue.capitalized)
         view.backgroundColor = .black
         imageView.contentMode = .scaleAspectFit
         imageView.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(imageView)
+        liveView.contentMode = .scaleAspectFit; liveView.isHidden = true
+        liveView.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(liveView)
+        NSLayoutConstraint.activate([
+            liveView.leadingAnchor.constraint(equalTo: imageView.leadingAnchor), liveView.trailingAnchor.constraint(equalTo: imageView.trailingAnchor),
+            liveView.topAnchor.constraint(equalTo: imageView.topAnchor), liveView.bottomAnchor.constraint(equalTo: imageView.bottomAnchor)
+        ])
+        liveView.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(holdLive(_:))))
         saveButton.setTitle(item.savedToPhotos ? "Saved to Photos" : "Save to Photos", for: .normal)
         saveButton.isEnabled = !item.savedToPhotos
         playButton.setTitle("Play clip", for: .normal); playButton.isHidden = item.videoURL == nil
+        separateButton.setTitle("Save photo + video", for: .normal); separateButton.isHidden = item.kind != .livePhoto
+        separateButton.isEnabled = !item.savedToPhotos
         shareButton.setTitle("Share", for: .normal)
-        for button in [saveButton, playButton, shareButton] {
+        for button in [saveButton, playButton, separateButton, shareButton] {
             button.tintColor = UIColor(red: 0.45, green: 0.95, blue: 0.82, alpha: 1)
             button.heightAnchor.constraint(equalToConstant: 48).isActive = true
         }
         saveButton.addTarget(self, action: #selector(save), for: .touchUpInside)
+        separateButton.addTarget(self, action: #selector(saveSeparate), for: .touchUpInside)
         playButton.addTarget(self, action: #selector(play), for: .touchUpInside)
         shareButton.addTarget(self, action: #selector(share), for: .touchUpInside)
         info.textColor = .lightGray; info.font = .systemFont(ofSize: 12); info.textAlignment = .center; info.numberOfLines = 3
-        info.text = item.kind == .motion ? "Motion saves as a still photo and a separate video in Photos.\nThis is a compatible motion pair, not a native Live Photo." : "Captures stay in MirrorCam until you delete them."
-        let stack = UIStackView(arrangedSubviews: [playButton, saveButton, shareButton, info])
+        info.text = item.kind == .livePhoto ? "Touch and hold the photo to animate it.\nSave to Photos imports one Live Photo.\nShare sends the original JPEG and MOV files."
+            : (item.kind == .motion ? "This older Motion capture saves as a photo and separate video." : "Captures stay in MirrorCam until you delete them.")
+        let stack = UIStackView(arrangedSubviews: [playButton, saveButton, separateButton, shareButton, info])
         stack.axis = .vertical; stack.spacing = 4; stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -108,18 +123,40 @@ final class MediaDetailViewController: UIViewController {
             let image = MediaStore.downsample(url, pixels: 1400)
             DispatchQueue.main.async { self?.imageView.image = image }
         }
-    }
-
-    @objc private func save() {
-        saveButton.isEnabled = false
-        MediaStore.shared.saveToPhotos(item) { [weak self] result in
-            guard let self = self else { return }
-            switch result {
-            case .success(let item): self.item = item; self.saveButton.setTitle("Saved to Photos", for: .normal)
-            case .failure(let error): self.saveButton.isEnabled = true; self.showMessage(error.localizedDescription, settings: true)
+        if item.kind == .livePhoto, let photo = item.photoURL, let video = item.videoURL {
+            liveRequest = PHLivePhoto.request(withResourceFileURLs: [photo, video], placeholderImage: nil,
+                targetSize: CGSize(width: 750, height: 1000), contentMode: .aspectFit) { [weak self] livePhoto, result in
+                guard !(result[PHLivePhotoInfoIsDegradedKey] as? Bool ?? false) else { return }
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    self.liveView.livePhoto = livePhoto; self.liveView.isHidden = livePhoto == nil
+                    if livePhoto == nil { self.info.text = "Live preview is unavailable on this device. Play clip still works. Try Save to Photos, or save the photo + video separately." }
+                }
             }
         }
     }
+
+    @objc private func save() {
+        saveCapture(separate: false)
+    }
+    @objc private func saveSeparate() { saveCapture(separate: true) }
+    private func saveCapture(separate: Bool) {
+        saveButton.isEnabled = false; separateButton.isEnabled = false
+        MediaStore.shared.saveToPhotos(item, separate: separate) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let item): self.item = item; self.saveButton.setTitle("Saved to Photos", for: .normal)
+            case .failure(let error):
+                self.saveButton.isEnabled = true; self.separateButton.isEnabled = true
+                self.showMessage(error.localizedDescription, settings: PHPhotoLibrary.authorizationStatus() == .denied)
+            }
+        }
+    }
+    @objc private func holdLive(_ gesture: UILongPressGestureRecognizer) {
+        if gesture.state == .began { liveView.startPlayback(with: .full) }
+        else if gesture.state == .ended || gesture.state == .cancelled { liveView.stopPlayback() }
+    }
+    deinit { if let request = liveRequest { PHLivePhoto.cancelRequest(withRequestID: request) } }
     @objc private func play() {
         guard let url = item.videoURL else { return }
         let controller = AVPlayerViewController()
@@ -132,6 +169,6 @@ final class MediaDetailViewController: UIViewController {
         controller.popoverPresentationController?.sourceView = shareButton
         present(controller, animated: true)
     }
-    override func viewWillDisappear(_ animated: Bool) { super.viewWillDisappear(animated); player?.pause() }
+    override func viewWillDisappear(_ animated: Bool) { super.viewWillDisappear(animated); player?.pause(); liveView.stopPlayback() }
     override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); player?.pause() }
 }

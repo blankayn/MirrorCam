@@ -11,12 +11,15 @@ enum CameraError: LocalizedError {
 /// All append and finish calls occur on CameraEngine.queue. No second camera session.
 final class ClipWriter {
     let url: URL
+    let assetIdentifier: String?
     private let writer: AVAssetWriter
     private let video: AVAssetWriterInput
     private let audio: AVAssetWriterInput?
     private let start: CMTime
     private let queue: DispatchQueue
     private let maximumPendingFrames: Int
+    private let metadata: AVAssetWriterInputMetadataAdaptor?
+    private var stillMarker: AVTimedMetadataGroup?
     private var pendingVideo: [CMSampleBuffer] = []
     private var pendingAudio: [CMSampleBuffer] = []
     private var drainScheduled = false
@@ -27,7 +30,8 @@ final class ClipWriter {
     private var terminalError: Error?
     private(set) var frameCount = 0
 
-    init(url: URL, firstVideo: CMSampleBuffer, hasAudio: Bool, motion: Bool, queue: DispatchQueue) throws {
+    init(url: URL, firstVideo: CMSampleBuffer, hasAudio: Bool, motion: Bool, queue: DispatchQueue,
+         aspect: PhotoAspect = .wide, stillTime: CMTime? = nil) throws {
         self.url = url
         self.queue = queue
         maximumPendingFrames = motion ? 64 : 8
@@ -35,11 +39,15 @@ final class ClipWriter {
         guard let pixels = CMSampleBufferGetImageBuffer(firstVideo) else {
             throw CameraError.message("The camera did not provide a video frame.")
         }
-        writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+        writer = try AVAssetWriter(outputURL: url, fileType: motion ? .mov : .mp4)
+        assetIdentifier = motion ? UUID().uuidString : nil
+        let sourceSize = CGSize(width: CVPixelBufferGetWidth(pixels), height: CVPixelBufferGetHeight(pixels))
+        let size = motion ? FrameGeometry.outputSize(FrameGeometry.crop(sourceSize, aspect: aspect).size, maxEdge: nil) : sourceSize
         let settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: CVPixelBufferGetWidth(pixels),
-            AVVideoHeightKey: CVPixelBufferGetHeight(pixels),
+            AVVideoWidthKey: Int(size.width),
+            AVVideoHeightKey: Int(size.height),
+            AVVideoScalingModeKey: AVVideoScalingModeResizeAspectFill,
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: motion ? 1_500_000 : 4_000_000,
                 AVVideoExpectedSourceFrameRateKey: motion ? 15 : 30,
@@ -61,6 +69,34 @@ final class ClipWriter {
             writer.add(input)
             audio = input
         } else { audio = nil }
+        if let identifier = assetIdentifier, let stillTime = stillTime {
+            let item = AVMutableMetadataItem()
+            item.keySpace = .quickTimeMetadata
+            item.key = "com.apple.quicktime.content.identifier" as NSString
+            item.value = identifier as NSString
+            item.dataType = "com.apple.metadata.datatype.UTF-8"
+            writer.metadata = [item]
+            let spec: [String: Any] = [
+                kCMMetadataFormatDescriptionMetadataSpecificationKey_Identifier as String: "mdta/com.apple.quicktime.still-image-time",
+                kCMMetadataFormatDescriptionMetadataSpecificationKey_DataType as String: "com.apple.metadata.datatype.int8"
+            ]
+            var description: CMFormatDescription?
+            let status = CMMetadataFormatDescriptionCreateWithMetadataSpecifications(allocator: kCFAllocatorDefault,
+                metadataType: kCMMetadataFormatType_Boxed, metadataSpecifications: [spec] as CFArray,
+                formatDescriptionOut: &description)
+            guard status == noErr, let hint = description else { throw CameraError.message("Cannot create Live Photo timing metadata.") }
+            let input = AVAssetWriterInput(mediaType: .metadata, outputSettings: nil, sourceFormatHint: hint)
+            input.expectsMediaDataInRealTime = true
+            guard writer.canAdd(input) else { throw CameraError.message("Live Photo metadata is unavailable.") }
+            writer.add(input)
+            metadata = AVAssetWriterInputMetadataAdaptor(assetWriterInput: input)
+            let marker = AVMutableMetadataItem()
+            marker.keySpace = .quickTimeMetadata
+            marker.key = "com.apple.quicktime.still-image-time" as NSString
+            marker.value = NSNumber(value: Int8(0))
+            marker.dataType = "com.apple.metadata.datatype.int8"
+            stillMarker = AVTimedMetadataGroup(items: [marker], timeRange: CMTimeRange(start: stillTime, duration: CMTime(value: 1, timescale: 15)))
+        } else { metadata = nil }
         guard writer.startWriting() else { throw writer.error ?? CameraError.message("Cannot start recording.") }
         writer.startSession(atSourceTime: start)
     }
@@ -103,6 +139,10 @@ final class ClipWriter {
         guard writer.status == .writing else {
             fail(writer.error ?? CameraError.message("Recording failed.")); return
         }
+        if let marker = stillMarker, let metadata = metadata, metadata.assetWriterInput.isReadyForMoreMediaData {
+            guard metadata.append(marker) else { fail(writer.error ?? CameraError.message("Cannot write Live Photo timing.")); return }
+            stillMarker = nil
+        }
         while !pendingVideo.isEmpty && video.isReadyForMoreMediaData {
             guard video.append(pendingVideo.removeFirst()) else { fail(writer.error ?? CameraError.message("Video encoding failed.")); return }
             frameCount += 1
@@ -112,7 +152,7 @@ final class ClipWriter {
                 guard audio.append(pendingAudio.removeFirst()) else { fail(writer.error ?? CameraError.message("Audio encoding failed.")); return }
             }
         }
-        if !pendingVideo.isEmpty || !pendingAudio.isEmpty {
+        if !pendingVideo.isEmpty || !pendingAudio.isEmpty || stillMarker != nil {
             if ended && ProcessInfo.processInfo.systemUptime > finishDeadline { fail(CameraError.message("The encoder timed out.")); return }
             if !drainScheduled {
                 drainScheduled = true
@@ -132,7 +172,7 @@ final class ClipWriter {
             completion(.failure(error))
             return
         }
-        video.markAsFinished(); audio?.markAsFinished()
+        video.markAsFinished(); audio?.markAsFinished(); metadata?.assetWriterInput.markAsFinished()
         writer.finishWriting { [self] in
             if writer.status == .completed { completion(.success(url)) }
             else {

@@ -6,7 +6,13 @@ final class CameraViewController: UIViewController {
     private let preview = PreviewView()
     private let grid = GridView()
     private let shutter = ShutterButton()
-    private let modes = UISegmentedControl(items: ["PHOTO", "VIDEO", "MOTION"])
+    private let modes = UISegmentedControl(items: ["PHOTO", "VIDEO", "LIVE"])
+    private let frameButton = UIButton(type: .system)
+    private let zoomSlider = UISlider()
+    private let resetZoomButton = UIButton(type: .system)
+    private var photoOptions = PhotoOptions()
+    private var previewAspect: NSLayoutConstraint?
+    private var zoomLimit: CGFloat = 4
     private let gridButton = UIButton(type: .system)
     private let timerButton = UIButton(type: .system)
     private let flashButton = UIButton(type: .system)
@@ -39,6 +45,13 @@ final class CameraViewController: UIViewController {
         buildUI()
         preview.previewLayer.session = engine.session
         preview.previewLayer.videoGravity = .resizeAspectFill
+        engine.onZoom = { [weak self] actual, limit in
+            guard let self = self else { return }
+            self.zoom = actual; self.zoomLimit = limit
+            self.zoomSlider.maximumValue = Float(max(1.01, limit)); self.zoomSlider.value = Float(actual)
+            self.resetZoomButton.setTitle(String(format: "%.1f×", Double(actual)), for: .normal)
+            self.zoomSlider.isEnabled = limit > 1 && self.ready && !self.busy
+        }
         engine.onState = { [weak self] ready, busy, front, flash in
             guard let self = self else { return }
             self.ready = ready; self.busy = busy; self.front = front; self.flashAvailable = flash
@@ -50,7 +63,7 @@ final class CameraViewController: UIViewController {
         engine.onModeChanged = { [weak self] mode in
             guard let self = self else { return }
             self.mode = mode; self.modes.selectedSegmentIndex = mode.rawValue
-            self.modeSwitchPending = false; self.updateControls()
+            self.modeSwitchPending = false; self.updateFrame(); self.updateControls()
         }
         engine.onRecording = { [weak self] recording in
             guard let self = self else { return }
@@ -131,10 +144,7 @@ final class CameraViewController: UIViewController {
         view.backgroundColor = .black
         preview.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(preview)
-        NSLayoutConstraint.activate([
-            preview.leadingAnchor.constraint(equalTo: view.leadingAnchor), preview.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            preview.topAnchor.constraint(equalTo: view.topAnchor), preview.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
+        preview.clipsToBounds = true
         grid.backgroundColor = .clear; grid.isUserInteractionEnabled = false; grid.isHidden = true
         grid.contentMode = .redraw; grid.translatesAutoresizingMaskIntoConstraints = false
         preview.addSubview(grid)
@@ -152,9 +162,29 @@ final class CameraViewController: UIViewController {
         NSLayoutConstraint.activate([
             topBackdrop.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
             topBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            topBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12), topBackdrop.heightAnchor.constraint(equalToConstant: 48),
+            topBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12), topBackdrop.heightAnchor.constraint(equalToConstant: 88),
             top.leadingAnchor.constraint(equalTo: topBackdrop.leadingAnchor, constant: 4), top.trailingAnchor.constraint(equalTo: topBackdrop.trailingAnchor, constant: -4),
-            top.topAnchor.constraint(equalTo: topBackdrop.topAnchor), top.bottomAnchor.constraint(equalTo: topBackdrop.bottomAnchor)
+            top.topAnchor.constraint(equalTo: topBackdrop.topAnchor), top.heightAnchor.constraint(equalToConstant: 44)
+        ])
+        frameButton.setTitle("4:3 · Max", for: .normal)
+        frameButton.accessibilityLabel = "Photo Size and Zoom Adjustment"
+        frameButton.addTarget(self, action: #selector(adjustPhotoSize), for: .touchUpInside)
+        frameButton.titleLabel?.font = .systemFont(ofSize: 12, weight: .semibold); frameButton.tintColor = accent
+        resetZoomButton.setTitle("1.0×", for: .normal); resetZoomButton.tintColor = accent
+        resetZoomButton.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        resetZoomButton.accessibilityLabel = "Reset zoom to 1×"
+        resetZoomButton.addTarget(self, action: #selector(resetZoom), for: .touchUpInside)
+        zoomSlider.minimumValue = 1; zoomSlider.maximumValue = 4; zoomSlider.value = 1; zoomSlider.tintColor = accent
+        zoomSlider.accessibilityLabel = "Camera zoom"
+        zoomSlider.addTarget(self, action: #selector(slideZoom), for: .valueChanged)
+        let adjustments = UIStackView(arrangedSubviews: [frameButton, zoomSlider, resetZoomButton])
+        adjustments.axis = .horizontal; adjustments.spacing = 12; adjustments.translatesAutoresizingMaskIntoConstraints = false
+        topBackdrop.addSubview(adjustments)
+        NSLayoutConstraint.activate([
+            adjustments.leadingAnchor.constraint(equalTo: topBackdrop.leadingAnchor, constant: 12),
+            adjustments.trailingAnchor.constraint(equalTo: topBackdrop.trailingAnchor, constant: -12),
+            adjustments.topAnchor.constraint(equalTo: top.bottomAnchor), adjustments.bottomAnchor.constraint(equalTo: topBackdrop.bottomAnchor),
+            frameButton.widthAnchor.constraint(equalToConstant: 96), resetZoomButton.widthAnchor.constraint(equalToConstant: 44)
         ])
         for button in [gridButton, timerButton, flashButton, mirrorButton] {
             button.tintColor = .white; button.titleLabel?.font = .systemFont(ofSize: 12, weight: .semibold)
@@ -173,6 +203,15 @@ final class CameraViewController: UIViewController {
             bottom.leadingAnchor.constraint(equalTo: view.leadingAnchor), bottom.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             bottom.bottomAnchor.constraint(equalTo: view.bottomAnchor), bottom.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -180)
         ])
+        let frameArea = UILayoutGuide(); view.addLayoutGuide(frameArea)
+        NSLayoutConstraint.activate([
+            frameArea.leadingAnchor.constraint(equalTo: view.leadingAnchor), frameArea.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            frameArea.topAnchor.constraint(equalTo: topBackdrop.bottomAnchor, constant: 8), frameArea.bottomAnchor.constraint(equalTo: bottom.topAnchor, constant: -8),
+            preview.centerXAnchor.constraint(equalTo: frameArea.centerXAnchor), preview.centerYAnchor.constraint(equalTo: frameArea.centerYAnchor),
+            preview.widthAnchor.constraint(lessThanOrEqualTo: frameArea.widthAnchor), preview.heightAnchor.constraint(lessThanOrEqualTo: frameArea.heightAnchor)
+        ])
+        let fitWidth = preview.widthAnchor.constraint(equalTo: frameArea.widthAnchor); fitWidth.priority = .defaultHigh; fitWidth.isActive = true
+        updateFrame()
         modes.selectedSegmentIndex = 0; modes.tintColor = accent
         modes.setTitleTextAttributes([.font: UIFont.systemFont(ofSize: 12, weight: .semibold)], for: .normal)
         modes.addTarget(self, action: #selector(changeMode), for: .valueChanged)
@@ -231,6 +270,7 @@ final class CameraViewController: UIViewController {
     private func updatePreview() {
         guard let connection = preview.previewLayer.connection else { return }
         if connection.isVideoOrientationSupported { connection.videoOrientation = .portrait }
+        if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .off }
         if connection.isVideoMirroringSupported {
             connection.automaticallyAdjustsVideoMirroring = false; connection.isVideoMirrored = front
         }
@@ -256,6 +296,8 @@ final class CameraViewController: UIViewController {
         modes.isEnabled = idle; switchButton.isEnabled = idle
         mirrorButton.isEnabled = idle && front; flashButton.isEnabled = idle && flashAvailable
         timerButton.isEnabled = idle; galleryButton.isEnabled = !busy && !saving && !countdown && !modeSwitchPending
+        frameButton.isEnabled = idle && mode != .video
+        resetZoomButton.isEnabled = idle; zoomSlider.isEnabled = idle && zoomLimit > 1
         for button in [switchButton, mirrorButton, flashButton, timerButton, galleryButton] { button.alpha = button.isEnabled ? 1 : 0.4 }
         shutter.mode = mode
         updateStatus()
@@ -269,9 +311,9 @@ final class CameraViewController: UIViewController {
         } else {
             status.textColor = .white
             if saving { status.text = "Saving capture…" }
-            else if busy { status.text = mode == .motion ? "Hold steady · capturing motion…" : "Processing…" }
+            else if busy { status.text = mode == .motion ? "Hold steady · capturing Live Photo…" : "Processing…" }
             else if !ready { status.text = "Camera unavailable" }
-            else if mode == .motion { status.text = motionReady ? "Motion ready · 1.5s before + after" : "Motion warming up · early captures have a shorter lead-in" }
+            else if mode == .motion { status.text = motionReady ? "LIVE ready · 1.5s before + after" : "LIVE warming up · wait for full pre-roll" }
             else { status.text = front ? "Mirror preview · saved mirror \(mirrored ? "on" : "off")" : "Rear camera" }
         }
     }
@@ -300,7 +342,7 @@ final class CameraViewController: UIViewController {
         modeSwitchPending = true; updateControls()
         func apply(_ microphone: Bool) {
             guard request == modeRequest, cameraVisible else { return }
-            mode = requested; shutter.mode = mode; zoom = 1
+            mode = requested; shutter.mode = mode
             flash = .off; flashButton.setTitle("Flash Off", for: .normal); engine.setFlash(.off)
             engine.setMode(mode, microphone: microphone)
             if !microphone && mode != .photo { showMessage("Microphone access is disabled. Video and motion clips will be silent. Enable Microphone in Settings to record audio.", settings: true) }
@@ -334,9 +376,42 @@ final class CameraViewController: UIViewController {
     private func cancelCountdown() { countdownTimer?.invalidate(); countdownTimer = nil; countdownLabel.text = nil; updateControls() }
 
     @objc private func pinch(_ gesture: UIPinchGestureRecognizer) {
-        guard !busy, countdownTimer == nil else { return }
+        guard ready, !busy, !saving, !modeSwitchPending, countdownTimer == nil else { return }
         if gesture.state == .began { pinchStart = zoom }
-        zoom = max(1, min(4, pinchStart * gesture.scale)); engine.zoom(zoom)
+        zoom = max(1, min(zoomLimit, pinchStart * gesture.scale)); engine.zoom(zoom)
+    }
+
+    @objc private func slideZoom() { engine.zoom(CGFloat(zoomSlider.value)) }
+    @objc private func resetZoom() { engine.zoom(1) }
+
+    private func updateFrame() {
+        previewAspect?.isActive = false
+        let aspect: PhotoAspect = mode == .video ? .wide : photoOptions.aspect
+        previewAspect = preview.widthAnchor.constraint(equalTo: preview.heightAnchor, multiplier: aspect.portraitRatio)
+        previewAspect?.isActive = true
+        let size = photoOptions.resolution == .maximum ? "Max" : photoOptions.resolution.title
+        frameButton.setTitle("\(photoOptions.aspect.title.components(separatedBy: " ")[0]) · \(size)", for: .normal)
+        engine.setPhotoOptions(photoOptions)
+        view.setNeedsLayout()
+    }
+
+    @objc private func adjustPhotoSize() {
+        let alert = UIAlertController(title: "Photo Size and Zoom Adjustment",
+            message: "Choose the visible frame or output resolution. Use the zoom slider, pinch, or tap the zoom number to reset to 1×. LIVE stills use the video frame's resolution.", preferredStyle: .actionSheet)
+        for aspect in PhotoAspect.allCases {
+            alert.addAction(UIAlertAction(title: "\(aspect == photoOptions.aspect ? "✓ " : "")\(aspect.title)", style: .default) { [weak self] _ in
+                self?.photoOptions.aspect = aspect; self?.updateFrame()
+            })
+        }
+        for resolution in PhotoResolution.allCases {
+            alert.addAction(UIAlertAction(title: "\(resolution == photoOptions.resolution ? "✓ " : "")Size: \(resolution.title)", style: .default) { [weak self] _ in
+                self?.photoOptions.resolution = resolution; self?.updateFrame()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Reset zoom to 1×", style: .default) { [weak self] _ in self?.resetZoom() })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.popoverPresentationController?.sourceView = frameButton
+        present(alert, animated: true)
     }
 
     @objc private func openGallery() {

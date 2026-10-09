@@ -1,4 +1,6 @@
-# Device acceptance checklist (not yet executed)
+# Device acceptance checklist
+
+Version 1.0: the user reports successful installation and launch. The following detailed checks and version 1.1 runtime checks remain pending.
 
 Use a physical iPhone 6 on iOS 12. Record the OS patch, Xcode version, build log, and results. A successful Windows structural/syntax check is not an iOS build or runtime pass.
 
@@ -19,15 +21,15 @@ Use a physical iPhone 6 on iOS 12. Record the OS patch, Xcode version, build log
 | Video with mic denied | Explicit silent-recording message; valid playable silent MP4; Photo still works. |
 | Video mirroring | Front On and Off produce the requested saved mirroring; rear remains normal. |
 | Video torch | Rear Flash On illuminates during recording and turns off at stop/background. |
-| Motion full pre-roll | Wait for Motion ready, move a numbered card before shutter and after; resulting clip shows both sides of shutter and is roughly 3 s long. |
+| Motion full pre-roll | Wait for LIVE ready, move a numbered card before shutter and after; resulting clip shows both sides of shutter and is roughly 3 s long. |
 | Motion early shutter | Just after mode entry, either warming-up feedback or a shorter lead-in; never a crash. |
-| Motion pair | JPEG still and MP4 show consistent orientation and mirror state; gallery displays still and plays clip. |
+| LIVE pair | JPEG still and MOV show consistent orientation and mirror state; gallery displays still and plays clip. |
 | Buffer reset | Switch, rotate or toggle mirror in Motion; no stale frames from the previous configuration. |
 | Rotation | Capture photos and videos held portrait, upside-down and both landscapes; saved files appear upright in Photos and playback. Change orientation while recording: clip dimensions stay stable. |
 | Fast shutter taps | No duplicate photos, overlapping writers, stuck recording state or unexpected mode changes. |
 | Gallery lifecycle | Open/close Library repeatedly; camera resumes. Clip audio stops after dismissing playback. |
 | Gallery persistence | Kill/relaunch app after completed saves; all local items and thumbnails reappear. |
-| Photos allowed | Explicit save adds one photo/video, or two independent Motion assets; already-saved button prevents ordinary duplicate saves. |
+| Photos allowed | Explicit save adds one photo/video, or one Live Photo for LIVE captures; legacy Motion adds two assets; already-saved button prevents ordinary duplicate saves. |
 | Photos denied | Permission message, local capture preserved, retry works after granting access. |
 | Sharing | Share JPEG, MP4, and Motion pair using activity sheet; receiver can open them. |
 | Local deletion | Delete confirmation removes only the local item; exported Photos copies remain. |
@@ -38,3 +40,12 @@ Use a physical iPhone 6 on iOS 12. Record the OS patch, Xcode version, build log
 | Sustained use | Repeated Photo/Video/Motion captures do not produce unbounded memory growth or thermal instability. Check Instruments on the Mac. |
 
 Inspect video properties (duration, dimensions, audio track) on macOS with AVAsset or a media inspector. Compare saved orientations in Photos as well as MirrorCam: previews alone do not prove exported media correctness.
+
+## Version 1.1 framing and LIVE checks
+
+- Front/rear, Photo/LIVE: at 1×, hold a card with marks at each visible frame edge. The same marks must remain at corresponding saved-image edges in Library and Photos. Repeat at each aspect ratio, size and supported zoom, in portrait and both landscapes.
+- Switch mode at 2×: the zoom readout and actual framing stay consistent. Switching lenses resets both to 1×. Tap the zoom number to restore the full 1× view. Front camera zoom may be unavailable; the slider must disable and show 1×.
+- Default 4:3 full framing must not crop; square/wide crops must be visible before capture. Smaller output resolution must preserve the same composition.
+- LIVE: capture motion and sound, hold the Library photo to animate, release to stop, and play the clip separately. Save to Photos must create one asset showing the LIVE badge and press-and-hold animation.
+- LIVE fallback: if import fails, local JPEG/MOV remain playable. Save photo + video must create two assets only when explicitly chosen.
+- Old version 1.0 Photo/Video/Motion captures must still load after installing the update over the app with the same signing account and bundle ID.

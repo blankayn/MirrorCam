@@ -13,3 +13,7 @@ The validator parses the OpenStep project, resolves object references and source
 The [GitHub Actions run 37889696067](https://github.com/blankayn/MirrorCam/actions/runs/37889696067) successfully compiled the Release iOS app with Xcode 15.4 at commit `b6a3bb491de26685edca5c56537b6644d61093b4`. The log reports `BUILD SUCCEEDED`, a minimum OS version of `12.0`, and an `arm64` app executable. The build script packaged an unsigned IPA, including the embedded Swift compatibility libraries. The downloaded artifact ZIP matched GitHub's SHA-256 digest: `8f51304e5767b0637fc92e1eaabffe6721ebae081e84fa72ae3e6f0248644bb8`.
 
 **Not performed:** code signing, installation, simulator execution, or any physical iPhone test. Hardware encoder behavior, camera format selection, photo mirroring metadata, audio sync, rolling-buffer timing and interruption recovery require the physical-device checklist in `DEVICE-TESTS.md`. A successful compilation does not establish these runtime behaviors.
+
+## Version 1.1
+
+Local validation: 110 structural/syntax checks passed across ten Swift files. User confirmed version 1.0 launches on their phone. Version 1.1 cloud compilation and synthetic media checks are pending; its iPhone 6 framing, audio and Live Photo import/playback remain untested.

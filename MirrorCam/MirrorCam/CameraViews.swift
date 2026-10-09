@@ -50,7 +50,7 @@ final class ShutterButton: UIControl {
             self.centerShape.backgroundColor = self.mode == .video ? UIColor(red: 1, green: 0.24, blue: 0.3, alpha: 1) : .white
         }
         if animated { UIView.animate(withDuration: 0.2, animations: changes) } else { changes() }
-        accessibilityLabel = recording ? "Stop recording" : (mode == .video ? "Start recording" : (mode == .motion ? "Capture motion photo" : "Capture photo"))
+        accessibilityLabel = recording ? "Stop recording" : (mode == .video ? "Start recording" : (mode == .motion ? "Capture Live Photo" : "Capture photo"))
     }
 }
 

@@ -2,7 +2,7 @@
 
 A native Swift / UIKit camera project for **iPhone 6, iOS 12.0 or later**. Uses AVFoundation, PhotoKit and AVKit; no SwiftUI, package manager, network service, or third-party runtime dependency.
 
-**Build status:** Xcode 15.4 successfully built the Release arm64 iOS app on GitHub's macOS runner on 9 October 2026. [Download the unsigned IPA artifact](https://github.com/blankayn/MirrorCam/actions/runs/37889696067/artifacts/11597787130), extract its ZIP, and sign/install the IPA with Sideloadly. This artifact expires on 16 October; run the workflow again for a fresh download. Structural checks and Swift syntax parsing also passed. No simulator or physical-device tests have been performed. See `docs/VALIDATION.md`.
+**Build status:** version 1.0 compiled with Xcode 15.4 and the user confirmed it launches on their iPhone 6. Version 1.1 adds framing controls and software-created Live Photos; its new cloud build and media checks are pending. See `docs/VALIDATION.md`.
 
 ## What is implemented
 
@@ -11,14 +11,14 @@ A native Swift / UIKit camera project for **iPhone 6, iOS 12.0 or later**. Uses 
 | Photo | Full-resolution JPEG capture using `AVCapturePhotoOutput` and the photo preset. The front camera's resolution is limited by its hardware. |
 | Mirror | Front preview is always mirrored. **Mirror On/Off** controls saved front-camera JPEGs and videos. Rear-camera output remains normal. |
 | Video | H.264 MP4, target 720p / 30 fps, AAC microphone audio when permitted, start/stop shutter, elapsed timer. Rear flash On uses the torch during recording. |
-| Motion | JPEG + MP4 pair. VGA video at a target 15 fps, approximately 1.5 seconds before and after shutter. A small rolling buffer continuously runs only in Motion mode. |
+| LIVE | Software-created JPEG + MOV Live Photo, VGA video at 15 fps, approximately 1.5 seconds before and after shutter. Touch and hold in Library to animate; Save to Photos imports a single Live Photo asset. |
 | Controls | Front/back switch, thirds grid, 0 / 3 / 10 second countdown, flash Off/Auto/On for photos where supported, flash Off/On for video, pinch zoom capped at 4× or the hardware limit. |
 | Library | Local persistent gallery, still preview, video playback, sharing, save to Photos, and local deletion. |
 | Permissions | Camera required. Microphone requested on first entering Video/Motion; denial allows silent recording. Photos requested when **Save to Photos** is pressed; denial preserves the local capture. |
 
-The iPhone 6 does not support native Live Photo capture. Motion is deliberately a compatible **still + separate video**, displayed together inside MirrorCam. Saving a Motion item creates two assets in Photos. It does not create Apple's press-and-hold Live Photo format.
+The iPhone 6 does not support native Live Photo capture. LIVE uses the existing rolling video buffer and builds a JPEG + QuickTime MOV pair with a shared content identifier and timed key-photo marker. PhotoKit imports these resources as one Live Photo. This is software capture, inspired by Michael Melita's Iris12 experience; it uses public frameworks and requires no jailbreak. If PhotoKit rejects an import, the local capture remains available and **Save photo + video** provides an explicit fallback. Older Motion captures remain readable as separate-media pairs. Photos playback/import still needs verification on your iPhone 6.
 
-The UI stays in portrait for a stable camera layout. Device rotation controls the saved photo/video orientation, and recording locks orientation and mirroring until capture finishes. Video buffers are physically rotated/mirrored by the data-output connection; photo mirroring/orientation is carried by the JPEG's standard metadata. Preview fills the screen and crops its edges; saved media uses the full capture frame, so the saved framing can be wider than the preview. Apple's [capture-connection documentation](https://developer.apple.com/documentation/avfoundation/avcaptureconnection/isvideomirrored) describes these output differences.
+The UI stays in portrait, while device rotation controls the saved media orientation. The preview is a visible capture frame between the controls: its selected aspect crop matches the saved image. The default 4:3 frame retains the full sensor view; square and 16:9 intentionally crop both preview and output. Resolution choices only downsample and never add zoom. Still/video stabilization is disabled to avoid stabilization crops. Saved photos normalize orientation/mirroring into upright pixels. The gallery uses aspect-fit display, so its display size can differ while relative framing stays the same. Mirror Off deliberately reverses the saved front image relative to the mirrored preview.
 
 ## Project files
 
@@ -84,7 +84,7 @@ export DEVELOPER_DIR=/Applications/Xcode_15.4.app/Contents/Developer
 xcodebuild -version
 ```
 
-Open `MirrorCam.xcodeproj`, choose the **MirrorCam** scheme, and verify the target's iOS Deployment Target is **12.0**. For direct device running, add your Apple ID in Xcode Settings → Accounts, select a signing Team under Signing & Capabilities, and replace `com.example.MirrorCam` with your unique bundle identifier. Connect/trust the iPhone and build/run. A simulator can inspect the UI but cannot validate this camera pipeline.
+Open `MirrorCam.xcodeproj`, choose the **MirrorCam** scheme, and verify the target's iOS Deployment Target is **12.0**. For direct device running, add your Apple ID in Xcode Settings → Accounts, select a signing Team under Signing & Capabilities, and replace `com.example.MirrorCam` with your unique bundle identifier. Connect/trust the iPhone and build/run. A simulator can inspect the UI but cannot validate this camera pipeline. The workflow also runs `scripts/run-media-checks.sh` on macOS to check crop geometry and encode synthetic Live Photo resources with the actual app writer, then validate them with PhotoKit.
 
 ### Route A: unsigned build, sign with Sideloadly on Windows
 
@@ -122,7 +122,7 @@ Free-account signing normally expires after 7 days and is subject to Apple's app
 
 All capture-session mutation and sample-buffer handling runs on one serial queue. Heavy disk work uses a separate media queue; UI updates run on the main queue. Motion copies YUV pixels out of capture's reusable pool, retaining at most 25 VGA frames (around 12 MB plus padding) and a bounded audio window. The writer drains bounded queues to preserve pre-roll while the hardware encoder starts; video backpressure can drop frames rather than accumulate memory indefinitely. JPEG thumbnails are downsampled for the gallery.
 
-Entering Motion, switching lenses, rotating, toggling mirroring, or returning from the background resets the pre-roll. Wait for **Motion ready** for a full lead-in; early captures have a shorter lead-in. High-resolution photo processing is used in Photo mode; Motion uses the active capture format's ordinary still resolution to reduce video stalls. Flash is disabled in Motion. Slow hardware, interruptions, and dropped frames can affect the exact clip length; the target is approximately three seconds, not frame-accurate native Live Photo timing.
+Entering LIVE, switching lenses, rotating, toggling mirroring, or returning from the background resets the pre-roll. Wait for **LIVE ready** for a full lead-in; early captures have a shorter lead-in. Photo mode uses high-resolution still capture. LIVE extracts its key photo from the buffered video frame at shutter time to preserve framing and avoid a photo-output stall; the still is therefore limited to VGA resolution. Flash is disabled in LIVE. Changing framing or zoom also resets the lead-in buffer. Slow hardware, interruptions, and dropped frames can affect the exact clip length; the target is approximately three seconds, not frame-accurate native Live Photo timing.
 
 Leaving the app stops video and attempts to finalize it with a short background task. In-progress Motion capture is cancelled on interruptions/backgrounding. The app does not continue camera capture in the background. Captures are stored under Application Support/Captures, each with media, a thumbnail, and JSON metadata. Save to Photos is explicit and retries retain the local copy. Local deletion does not delete assets already in Photos.
 

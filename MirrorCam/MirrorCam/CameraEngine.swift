@@ -13,6 +13,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
     var onError: ((String) -> Void)?
     var onBufferReady: ((Bool) -> Void)?
     var onModeChanged: ((CaptureMode) -> Void)?
+    var onZoom: ((CGFloat, CGFloat) -> Void)? // actual zoom, hardware limit
 
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -41,6 +42,10 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
     private var motionPhoto: Data?
     private var motionURL: URL?
     private var bufferReady = false
+    private var photoOptions = PhotoOptions()
+    private var capturedOptions = PhotoOptions()
+    private var requestedZoom: CGFloat = 1
+    private let photoQueue = DispatchQueue(label: "com.mirrorcam.photo", qos: .userInitiated)
     private var observers: [NSObjectProtocol] = []
     private var busy: Bool { return photoPending || writer != nil || recordRequested || finishing || motionPending }
 
@@ -97,6 +102,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
                 self.videoOutput.alwaysDiscardsLateVideoFrames = true
                 self.videoOutput.setSampleBufferDelegate(self, queue: self.queue)
                 self.configured = true
+                self.applyZoom()
                 self.applyConnections()
             } catch {
                 self.session.beginConfiguration()
@@ -175,6 +181,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
             self.videoOutput.connection(with: .video)?.isEnabled = newMode != .photo
             self.session.commitConfiguration()
             self.configureFrameRate(newMode == .motion ? 15 : 30)
+            self.applyZoom()
             self.clearBuffer(); self.emitState()
             DispatchQueue.main.async { self.onModeChanged?(newMode) }
         }
@@ -207,6 +214,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
                 self.applyConnections()
                 self.session.commitConfiguration()
                 self.configureFrameRate(self.mode == .motion ? 15 : 30)
+                self.requestedZoom = 1; self.applyZoom()
                 self.clearBuffer(); self.emitState()
             } catch { self.report(error.localizedDescription) }
         }
@@ -235,6 +243,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
         for output in [photoOutput as AVCaptureOutput, videoOutput as AVCaptureOutput] {
             guard let connection = output.connection(with: .video) else { continue }
             if connection.isVideoOrientationSupported { connection.videoOrientation = orientation }
+            if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .off }
             if connection.isVideoMirroringSupported {
                 connection.automaticallyAdjustsVideoMirroring = false
                 connection.isVideoMirrored = input?.device.position == .front && saveMirrored
@@ -246,13 +255,25 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
 
     func zoom(_ factor: CGFloat) {
         queue.async {
-            guard !self.busy, let device = self.input?.device else { return }
-            do {
-                try device.lockForConfiguration()
-                device.videoZoomFactor = max(1, min(factor, min(4, device.activeFormat.videoMaxZoomFactor)))
-                device.unlockForConfiguration()
-            } catch { self.report(error.localizedDescription) }
+            guard !self.busy else { return }
+            self.requestedZoom = factor; self.applyZoom(); self.clearBuffer()
         }
+    }
+
+    private func applyZoom() {
+        guard let device = input?.device else { return }
+        let limit = min(4, device.activeFormat.videoMaxZoomFactor)
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            let actual = max(1, min(requestedZoom, limit))
+            device.videoZoomFactor = actual; requestedZoom = actual
+            DispatchQueue.main.async { self.onZoom?(actual, limit) }
+        } catch { report(error.localizedDescription) }
+    }
+
+    func setPhotoOptions(_ options: PhotoOptions) {
+        queue.async { if !self.busy { self.photoOptions = options; self.clearBuffer() } }
     }
 
     func shutter() {
@@ -273,26 +294,45 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
                 return
             }
             guard !self.busy else { return }
+            self.capturedOptions = self.photoOptions
             self.captureGeneration = UUID()
             let generation = self.captureGeneration
             if self.mode == .motion {
-                guard let first = self.buffer.video.first, let last = self.buffer.lastTime else {
+                guard let first = self.buffer.video.first, let lastSample = self.buffer.video.last,
+                      let last = self.buffer.lastTime, let pixels = CMSampleBufferGetImageBuffer(lastSample) else {
                     self.report("Motion camera is warming up. Try again in a moment."); return
                 }
                 do {
-                    let clip = try ClipWriter(url: Self.temporaryMovie(), firstVideo: first,
-                                              hasAudio: self.audioInput != nil, motion: true, queue: self.queue)
+                    let clip = try ClipWriter(url: Self.temporaryMovie(motion: true), firstVideo: first,
+                                              hasAudio: self.audioInput != nil, motion: true, queue: self.queue,
+                                              aspect: self.photoOptions.aspect, stillTime: last)
                     self.writer = clip
+                    self.motionPending = true
+                    self.photoPending = true
+                    self.photoID = nil
+                    let options = self.capturedOptions
+                    self.photoQueue.async {
+                        let result = Result { try PhotoFraming.still(pixels, options: options, identifier: clip.assetIdentifier) }
+                        self.queue.async {
+                            guard self.captureGeneration == generation, self.motionPending else { return }
+                            self.photoPending = false
+                            switch result {
+                            case .success(let data): self.motionPhoto = data; self.completeMotionIfReady()
+                            case .failure(let error): self.abortMotion(error.localizedDescription)
+                            }
+                            self.emitState()
+                        }
+                    }
                     // Inputs have independent timelines; both use the first video timestamp as origin.
                     for sample in self.buffer.video { try clip.append(sample, isVideo: true) }
                     for sample in self.buffer.audio { try clip.append(sample, isVideo: false) }
                     self.buffer.clear()
-                    self.motionPending = true
                     self.motionEnd = CMTimeAdd(last, CMTime(seconds: 1.5, preferredTimescale: 600))
                     self.queue.asyncAfter(deadline: .now() + 5) {
                         if self.captureGeneration == generation && self.motionPending { self.abortMotion("Motion capture timed out. Please try again.") }
                     }
                 } catch { self.failCapture(error.localizedDescription); return }
+                self.emitState(); return
             }
             self.capturePhoto()
         }
@@ -304,6 +344,8 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
         photoID = settings.uniqueID
         processedPhoto = nil; processingError = nil
         settings.isHighResolutionPhotoEnabled = mode == .photo
+        // Still stabilization may crop relative to preview on older cameras.
+        settings.isAutoStillImageStabilizationEnabled = false
         if mode == .photo, input?.device.hasFlash == true,
            photoOutput.supportedFlashModes.contains(flash) { settings.flashMode = flash }
         else { settings.flashMode = .off }
@@ -322,16 +364,25 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
         queue.async {
             guard self.photoPending, self.photoID == resolvedSettings.uniqueID else { return }
-            self.photoPending = false
             let captureError = error ?? self.processingError
             guard captureError == nil, let data = self.processedPhoto else {
                 self.processedPhoto = nil
                 self.failCapture(captureError?.localizedDescription ?? "Could not capture a photo."); return
             }
             self.processedPhoto = nil; self.processingError = nil
-            if self.motionPending { self.motionPhoto = data; self.completeMotionIfReady() }
-            else { DispatchQueue.main.async { self.onCapture?(data, nil, .photo) } }
-            self.emitState()
+            let generation = self.captureGeneration, options = self.capturedOptions
+            self.photoQueue.async {
+                let result = Result { try PhotoFraming.process(data, options: options) }
+                self.queue.async {
+                    guard self.captureGeneration == generation, self.photoPending else { return }
+                    self.photoPending = false
+                    switch result {
+                    case .success(let data): DispatchQueue.main.async { self.onCapture?(data, nil, .photo) }
+                    case .failure(let error): self.failCapture(error.localizedDescription)
+                    }
+                    self.emitState()
+                }
+            }
         }
     }
 
@@ -440,7 +491,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
     }
 
     private func report(_ message: String) { DispatchQueue.main.async { self.onError?(message) } }
-    private static func temporaryMovie() -> URL {
-        return FileManager.default.temporaryDirectory.appendingPathComponent("MirrorCam-\(UUID().uuidString).mp4")
+    private static func temporaryMovie(motion: Bool = false) -> URL {
+        return FileManager.default.temporaryDirectory.appendingPathComponent("MirrorCam-\(UUID().uuidString).\(motion ? "mov" : "mp4")")
     }
 }

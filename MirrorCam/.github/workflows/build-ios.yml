@@ -46,6 +46,10 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         run: python3 scripts/validate-project.py
 
+      - name: Check framing and Live Photo resources
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: bash scripts/run-media-checks.sh
+
       - name: Build unsigned arm64 IPA
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
