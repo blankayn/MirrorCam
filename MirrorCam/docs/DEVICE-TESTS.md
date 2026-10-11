@@ -1,6 +1,6 @@
 # Device acceptance checklist
 
-Version 1.0: the user reports successful installation and launch. The following detailed checks and version 1.1/1.2/1.3 runtime checks remain pending.
+Version 1.0: the user reports successful installation and launch. The following detailed checks and version 1.1/1.2/1.3/1.4 runtime checks remain pending.
 
 Use a physical iPhone 6 on iOS 12. Record the OS patch, Xcode version, build log, and results. A successful Windows structural/syntax check is not an iOS build or runtime pass.
 
@@ -12,7 +12,9 @@ Use a physical iPhone 6 on iOS 12. Record the OS patch, Xcode version, build log
 | Camera denied/restricted | Clear access message and Settings route; local library remains accessible. |
 | Return from Settings | Camera resumes after access is granted; permission changes do not crash. |
 | Front photo Mirror On | Hold readable text in view: saved JPEG and Photos preview match the mirrored preview. |
-| Front photo Mirror Off | Preview stays mirrored; saved photo's readable text is normal. |
+| Front photo Mirror Off | Preview flips immediately after accepting the change; readable text reads normally in both preview and saved photo. Framing and zoom stay unchanged. |
+| Mirror preference | Choose Off, change modes, switch rear/front, and kill/reopen the app. Front preview, button state and future captures remain unmirrored. Repeat with On. Existing library images remain unchanged. |
+| Mirror during capture | Countdown, HDR processing, video recording and LIVE capture disable the toggle. Rapid taps when idle never leave the preview and capture preference out of sync or controls stuck. |
 | Rear photo | Normal orientation/mirroring; high-resolution still capture; flash controls become available. |
 | Camera layout | At standard iPhone 6 display size, default 4:3 preview spans screen width (375 × 500 points), compact toolbar and shutter remain usable. Size/zoom bar overlays preview. Check Display Zoom and mode changes for clipping or constraint problems. |
 | Library signature | Header displays MirrorCam and by kirtdmno; Camera/Edit remain accessible and media has no added watermark. |
@@ -24,7 +26,7 @@ Use a physical iPhone 6 on iOS 12. Record the OS patch, Xcode version, build log
 | Photo flash | Rear Off/Auto/On behave as supported; front flash is unavailable. |
 | Video with mic allowed | Start/stop controls and timer work; saved MP4 has audible audio and sensible A/V sync. |
 | Video with mic denied | Explicit silent-recording message; valid playable silent MP4; Photo still works. |
-| Video mirroring | Front On and Off produce the requested saved mirroring; rear remains normal. |
+| Video mirroring | Front On and Off match the live preview and requested saved mirroring; rear remains normal. |
 | Video torch | Rear Flash On illuminates during recording and turns off at stop/background. |
 | Motion full pre-roll | Wait for LIVE ready, move a numbered card before shutter and after; resulting clip shows both sides of shutter and is roughly 3 s long. |
 | Motion early shutter | Just after mode entry, either warming-up feedback or a shorter lead-in; never a crash. |

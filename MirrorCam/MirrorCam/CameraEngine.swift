@@ -16,6 +16,7 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
     var onZoom: ((CGFloat, CGFloat) -> Void)? // actual zoom, hardware limit
     var onLiveBackend: ((Bool, String) -> Void)? // native backend active, diagnostic
     var onHDR: ((Bool) -> Void)? // bracket capture available on the current camera
+    var onMirror: ((Bool) -> Void)? // accepted front-camera preview/capture preference
 
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -305,8 +306,13 @@ final class CameraEngine: NSObject, AVCapturePhotoCaptureDelegate,
 
     func setMirror(_ enabled: Bool) {
         queue.async {
-            guard !self.busy else { return }
+            guard !self.busy else {
+                let current = self.saveMirrored
+                DispatchQueue.main.async { self.onMirror?(current) }
+                return
+            }
             self.saveMirrored = enabled; self.applyConnections(); self.clearBuffer()
+            DispatchQueue.main.async { self.onMirror?(enabled) }
         }
     }
 

@@ -40,3 +40,9 @@ The user confirmed version 1.0 installs and launches on the iPhone. No simulator
 - Downloaded IPA archive integrity passed; Info.plist and Mach-O verify version 1.3 (build 4), arm64 and minimum OS 12.0. Embedded Swift libraries are present. Artifact ZIP SHA-256 `3e00e2b0d0c14d9a5a5f40847f29ce628133a891b99262e4dcf5fd6613e1f493` matches GitHub's digest.
 
 No simulator or physical iPhone 6 test of version 1.3 has been performed. Synthetic HDR inputs do not establish actual camera bracketing support, handheld image quality, latency, memory use or Photos saving. Screen geometry and library-header visibility require the device checklist.
+
+## Version 1.4
+
+- Windows validation passed **123 structural/syntax checks across eleven Swift files** on 11 October 2026.
+- Mirror On/Off now sets the front preview and capture connections together. The UI waits for the engine to accept the setting and remembers it in UserDefaults. Rear preview remains unmirrored; software LIVE clears its buffer when the setting changes.
+- The iOS build and physical-device checks are pending. Existing software media tests do not exercise the live camera preview or preference persistence.

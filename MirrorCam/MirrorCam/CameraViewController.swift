@@ -2,6 +2,7 @@ import UIKit
 import AVFoundation
 
 final class CameraViewController: UIViewController {
+    private static let mirrorPreferenceKey = "mirrorFrontCamera"
     private let engine = CameraEngine()
     private let preview = PreviewView()
     private let grid = GridView()
@@ -33,7 +34,9 @@ final class CameraViewController: UIViewController {
     private let countdownLabel = UILabel()
     private var mode: CaptureMode = .photo
     private var ready = false, busy = false, recording = false, saving = false, front = true
-    private var flashAvailable = false, mirrored = true, motionReady = false
+    private var flashAvailable = false, motionReady = false
+    private var mirrored = UserDefaults.standard.object(forKey: CameraViewController.mirrorPreferenceKey) as? Bool ?? true
+    private var mirrorChangePending = false
     private var flash: AVCaptureDevice.FlashMode = .off
     private var timerSeconds = 0
     private var countdownTimer: Timer?
@@ -55,6 +58,13 @@ final class CameraViewController: UIViewController {
         buildUI()
         preview.previewLayer.session = engine.session
         preview.previewLayer.videoGravity = .resizeAspectFill
+        engine.onMirror = { [weak self] enabled in
+            guard let self = self else { return }
+            self.mirrored = enabled; self.mirrorChangePending = false
+            UserDefaults.standard.set(enabled, forKey: CameraViewController.mirrorPreferenceKey)
+            self.updatePreview(); self.updateControls()
+        }
+        engine.setMirror(mirrored)
         engine.onHDR = { [weak self] available in
             self?.hdrAvailable = available; self?.updateControls()
         }
@@ -218,14 +228,15 @@ final class CameraViewController: UIViewController {
             button.tintColor = .white; button.titleLabel?.font = .systemFont(ofSize: 11, weight: .semibold)
         }
         gridButton.setTitle("Grid Off", for: .normal); timerButton.setTitle("Timer Off", for: .normal)
-        flashButton.setTitle("Flash Off", for: .normal); mirrorButton.setTitle("Mirror On", for: .normal)
+        flashButton.setTitle("Flash Off", for: .normal)
         hdrButton.setTitle("HDR Off", for: .normal); hdrButton.accessibilityLabel = "Three-exposure HDR"
         hdrButton.addTarget(self, action: #selector(toggleHDR), for: .touchUpInside)
         gridButton.addTarget(self, action: #selector(toggleGrid), for: .touchUpInside)
         timerButton.addTarget(self, action: #selector(cycleTimer), for: .touchUpInside)
         flashButton.addTarget(self, action: #selector(cycleFlash), for: .touchUpInside)
         mirrorButton.addTarget(self, action: #selector(toggleMirror), for: .touchUpInside)
-        mirrorButton.accessibilityLabel = "Save front camera photos and videos mirrored"
+        mirrorButton.accessibilityLabel = "Flip front camera view"
+        mirrorButton.accessibilityHint = "Switches both the preview and saved selfies between mirrored and natural views."
 
         let bottom = UIView(); bottom.backgroundColor = .black
         bottom.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(bottom)
@@ -307,7 +318,8 @@ final class CameraViewController: UIViewController {
         if connection.isVideoOrientationSupported { connection.videoOrientation = .portrait }
         if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .off }
         if connection.isVideoMirroringSupported {
-            connection.automaticallyAdjustsVideoMirroring = false; connection.isVideoMirrored = front
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = front && mirrored
         }
     }
 
@@ -325,11 +337,14 @@ final class CameraViewController: UIViewController {
 
     private func updateControls() {
         let countdown = countdownTimer != nil
-        let idle = ready && !busy && !saving && !countdown && !modeSwitchPending
+        let idle = ready && !busy && !saving && !countdown && !modeSwitchPending && !mirrorChangePending
         shutter.isEnabled = recording || countdown || idle
         shutter.alpha = shutter.isEnabled ? 1 : 0.45
         modes.isEnabled = idle; switchButton.isEnabled = idle
         mirrorButton.isEnabled = idle && front; flashButton.isEnabled = idle && flashAvailable
+        mirrorButton.setTitle(front ? (mirrored ? "Mirror On" : "Mirror Off") : "Mirror —", for: .normal)
+        mirrorButton.accessibilityValue = front ? (mirrored ? "Mirrored" : "Natural, unmirrored") : "Rear camera is unmirrored"
+        mirrorButton.tintColor = front && !mirrored ? accent : .white
         hdrButton.isEnabled = idle && mode == .photo && hdrAvailable
         hdrButton.setTitle(mode == .photo && !hdrAvailable ? "HDR —" : (hdrRequested ? "HDR On" : "HDR Off"), for: .normal)
         hdrButton.accessibilityLabel = hdrAvailable ? "Three-exposure HDR \(hdrRequested ? "on" : "off")" : "HDR unavailable on this camera format"
@@ -356,7 +371,7 @@ final class CameraViewController: UIViewController {
             else if !ready { status.text = "Camera unavailable" }
             else if mode == .motion && nativeLive { status.text = "Iris12 experiment · native LIVE ready" }
             else if mode == .motion { status.text = motionReady ? "LIVE ready · 1.5s before + after" : "LIVE warming up · wait for full pre-roll" }
-            else { status.text = front ? "Mirror preview · saved mirror \(mirrored ? "on" : "off")" : "Rear camera" }
+            else { status.text = front ? (mirrored ? "Mirrored view · preview and selfie match" : "Natural view · preview and selfie unmirrored") : "Rear camera" }
         }
     }
 
@@ -374,7 +389,9 @@ final class CameraViewController: UIViewController {
         engine.setFlash(flash)
     }
     @objc private func toggleMirror() {
-        mirrored.toggle(); mirrorButton.setTitle(mirrored ? "Mirror On" : "Mirror Off", for: .normal); engine.setMirror(mirrored)
+        guard ready, front, !busy, !saving, !modeSwitchPending, !mirrorChangePending, countdownTimer == nil else { return }
+        mirrorChangePending = true; updateControls()
+        engine.setMirror(!mirrored)
     }
     @objc private func toggleHDR() {
         hdrRequested.toggle(); engine.setHDR(hdrRequested)

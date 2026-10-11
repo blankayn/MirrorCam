@@ -10,7 +10,7 @@ A native Swift / UIKit camera project for **iPhone 6, iOS 12.0 or later**. Uses 
 |---|---|
 | Photo | Full-resolution JPEG capture using `AVCapturePhotoOutput` and the photo preset. The front camera's resolution is limited by its hardware. |
 | HDR | Photo-only Off/On control where three-exposure bracketing is supported. Combines dark/normal/bright exposures, translation alignment and tone mapping into one JPEG. Flash stays off, HDR has a 1600-pixel maximum long edge; a failed merge saves a regular photo with a message. |
-| Mirror | Front preview is always mirrored. **Mirror On/Off** controls saved front-camera JPEGs and videos. Rear-camera output remains normal. |
+| Mirror | **Mirror On/Off** flips both the front preview and future saved photos, videos and LIVE captures. Mirror Off shows the natural, unmirrored orientation. The choice persists across launches; rear-camera output remains unmirrored. |
 | Video | H.264 MP4, target 720p / 30 fps, AAC microphone audio when permitted, start/stop shutter, elapsed timer. Rear flash On uses the torch during recording. |
 | LIVE | Software-created JPEG + MOV Live Photo, VGA video at 15 fps, approximately 1.5 seconds before and after shutter. Touch and hold in Library to animate; Save to Photos imports a single Live Photo asset. |
 | Iris12 experiment | Optional iOS 12 capability overrides reverse engineered from Michael Melita's Iris12 0.0.2. Tries native `AVCapturePhotoOutput` Live Photos inside MirrorCam, reverting to software LIVE on a reported rejection/error/timeout. Physical-device outcome is unverified. |
@@ -20,7 +20,7 @@ A native Swift / UIKit camera project for **iPhone 6, iOS 12.0 or later**. Uses 
 
 Apple does not advertise native Live Photo capture on iPhone 6. The default LIVE mode uses a rolling video buffer and builds a JPEG + QuickTime MOV pair with a shared content identifier and timed key-photo marker, using public frameworks without a jailbreak. PhotoKit imports these resources as one Live Photo. The optional Iris12 experiment uses private runtime capability overrides inside this app; it is off at launch. See [`docs/IRIS12-ANALYSIS.md`](docs/IRIS12-ANALYSIS.md) for the binary findings and experiment limits. If PhotoKit rejects an import, the local capture remains available and **Save photo + video** provides an explicit fallback. Older Motion captures remain readable as separate-media pairs. Photos playback/import still needs verification on your iPhone 6.
 
-The UI stays in portrait, while device rotation controls the saved media orientation. On iPhone 6 at standard display size (375 × 667 points), the default photo layout has a 44-point toolbar, full-width 375 × 500-point 4:3 preview and 123-point shutter area, modeled on the original Camera. The size/zoom bar overlays the preview. Video uses a full-width 16:9 preview behind the controls. Smaller displays adapt to available space. The default 4:3 frame retains the full sensor view; square and 16:9 intentionally crop both preview and output. Resolution choices only downsample and never add zoom. Still/video stabilization is disabled to avoid stabilization crops. Saved photos normalize orientation/mirroring into upright pixels. The gallery uses aspect-fit display, so its display size can differ while relative framing stays the same. Mirror Off deliberately reverses the saved front image relative to the mirrored preview.
+The UI stays in portrait, while device rotation controls the saved media orientation. On iPhone 6 at standard display size (375 × 667 points), the default photo layout has a 44-point toolbar, full-width 375 × 500-point 4:3 preview and 123-point shutter area, modeled on the original Camera. The size/zoom bar overlays the preview. Video uses a full-width 16:9 preview behind the controls. Smaller displays adapt to available space. The default 4:3 frame retains the full sensor view; square and 16:9 intentionally crop both preview and output. Resolution choices only downsample and never add zoom. Still/video stabilization is disabled to avoid stabilization crops. Saved photos normalize orientation/mirroring into upright pixels. The gallery uses aspect-fit display, so its display size can differ while relative framing stays the same. Mirror On/Off keeps front preview and output in the selected orientation without changing framing or zoom.
 
 ## Project files
 
@@ -137,6 +137,10 @@ Entering LIVE, switching lenses, rotating, toggling mirroring, or returning from
 Leaving the app stops video and attempts to finalize it with a short background task. In-progress Motion capture is cancelled on interruptions/backgrounding. The app does not continue camera capture in the background. Captures are stored under Application Support/Captures, each with media, a thumbnail, and JSON metadata. Save to Photos is explicit and retries retain the local copy. Local deletion does not delete assets already in Photos.
 
 After installing an update, run `docs/DEVICE-TESTS.md` on the actual iPhone 6/iOS 12 device, including edge-to-edge framing comparisons, audio sync, all orientations, pre-roll, Live Photo import and interruption behavior.
+
+## Version 1.4 natural view
+
+On the front camera, tap **Mirror On** to switch to **Mirror Off**. The live preview and future saved captures now use the same unmirrored orientation; readable text should read normally in both. Tap again to restore the mirrored view. The setting is remembered after reopening the app and switching modes or cameras. Existing library photos are unchanged. Switching mirroring resets the software LIVE buffer, so wait for LIVE ready before capturing a full lead-in.
 
 ## Version 1.1 update
 
