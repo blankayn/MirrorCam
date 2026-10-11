@@ -15,8 +15,8 @@ A native Swift / UIKit camera project for **iPhone 6, iOS 12.0 or later**. Uses 
 | LIVE | Software-created JPEG + MOV Live Photo, VGA video at 15 fps, approximately 1.5 seconds before and after shutter. Touch and hold in Library to animate; Save to Photos imports a single Live Photo asset. |
 | Iris12 experiment | Optional iOS 12 capability overrides reverse engineered from Michael Melita's Iris12 0.0.2. Tries native `AVCapturePhotoOutput` Live Photos inside MirrorCam, reverting to software LIVE on a reported rejection/error/timeout. Physical-device outcome is unverified. |
 | Controls | Front/back switch, thirds grid, 0 / 3 / 10 second countdown, flash Off/Auto/On for photos where supported, flash Off/On for video, pinch zoom capped at 4× or the hardware limit. |
-| Library | Local persistent gallery with “by kirtdmno” in its header, still preview, video playback, sharing, save to Photos, and local deletion. |
-| Permissions | Camera required. Microphone requested on first entering Video/LIVE; denial allows silent recording. Photos requested when **Save to Photos** is pressed; denial preserves the local capture. |
+| Library | Local persistent gallery with “by kirtdmno” in its header, Photos import, horizontal-flip preview and still-photo copies, video playback, sharing, save to Photos, and local deletion. |
+| Permissions | Camera required. Microphone requested on first entering Video/LIVE; denial allows silent recording. Photos requested on **Import** or **Save to Photos**; denial preserves local captures. |
 
 Apple does not advertise native Live Photo capture on iPhone 6. The default LIVE mode uses a rolling video buffer and builds a JPEG + QuickTime MOV pair with a shared content identifier and timed key-photo marker, using public frameworks without a jailbreak. PhotoKit imports these resources as one Live Photo. The optional Iris12 experiment uses private runtime capability overrides inside this app; it is off at launch. See [`docs/IRIS12-ANALYSIS.md`](docs/IRIS12-ANALYSIS.md) for the binary findings and experiment limits. If PhotoKit rejects an import, the local capture remains available and **Save photo + video** provides an explicit fallback. Older Motion captures remain readable as separate-media pairs. Photos playback/import still needs verification on your iPhone 6.
 
@@ -137,6 +137,10 @@ Entering LIVE, switching lenses, rotating, toggling mirroring, or returning from
 Leaving the app stops video and attempts to finalize it with a short background task. In-progress Motion capture is cancelled on interruptions/backgrounding. The app does not continue camera capture in the background. Captures are stored under Application Support/Captures, each with media, a thumbnail, and JSON metadata. Save to Photos is explicit and retries retain the local copy. Local deletion does not delete assets already in Photos.
 
 After installing an update, run `docs/DEVICE-TESTS.md` on the actual iPhone 6/iOS 12 device, including edge-to-edge framing comparisons, audio sync, all orientations, pre-roll, Live Photo import and interruption behavior.
+
+## Version 1.5 existing-photo flip
+
+Open **Library → Import** to choose a still image from Apple Photos, or open a photo already in MirrorCam. Tap **Flip horizontally** to preview, **Create flipped copy**, then **Save to Photos** on the new copy. **Undo flip** cancels the preview. Originals remain unchanged. LIVE/Motion items create a still-photo copy only; their clip is not edited. Imported/edited copies are JPEG, retain the complete aspect ratio, and have a maximum long edge of 2048 pixels to limit memory on iPhone 6. Orientation is baked into upright pixels; capture metadata, location and Live Photo pairing metadata are not carried into copies. This works through iOS 12's image picker and does not require Photos' built-in Flip tool.
 
 ## Version 1.4 natural view
 

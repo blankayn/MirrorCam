@@ -222,4 +222,38 @@ let oversized = [-1.5, 0, 1.5].map { HDRFrame(data: hdrFixture(bias: Float($0), 
 let limitedHDR = try HDRProcessor.merge(oversized, options: PhotoOptions())
 let limitedImage = CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithData(limitedHDR as CFData, nil)!, 0, nil)!
 check(limitedImage.width == 1600 && limitedImage.height == 1200, "HDR decode and output are bounded to 1600 pixels")
+// Existing-image editing must flip displayed pixels after applying all EXIF orientations.
+let editURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/edit-source.jpg")
+for orientation in 1...8 {
+    let sourceData = hdrFixture(bias: -1.5, orientation: orientation, width: 320, height: 240)
+    try sourceData.write(to: editURL)
+    let imported = try PhotoFraming.editedPhoto(editURL, flipped: false)
+    let flipped = try PhotoFraming.editedPhoto(editURL, flipped: true)
+    let source = CGImageSourceCreateWithData(flipped as CFData, nil)!
+    let image = CGImageSourceCreateImageAtIndex(source, 0, nil)!
+    let expected = orientation >= 5 ? CGSize(width: 240, height: 320) : CGSize(width: 320, height: 240)
+    check(CGSize(width: image.width, height: image.height) == expected, "Editing preserves full framing for EXIF \(orientation)")
+    let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)! as NSDictionary
+    check((properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue == 1, "Edited pixels are upright for EXIF \(orientation)")
+    check(properties[kCGImagePropertyMakerAppleDictionary] == nil, "Still-photo copy does not retain Live Photo pairing metadata")
+    check([0.125, 0.375, 0.625, 0.875].allSatisfy { x in
+        [0.25, 0.75].allSatisfy { y in
+            abs(hdrPixel(flipped, xFraction: x, yFraction: y) - hdrPixel(imported, xFraction: 1 - x, yFraction: y)) < 12
+        }
+    }, "Horizontal flip reverses displayed columns without vertical inversion for EXIF \(orientation)")
+    try flipped.write(to: editURL)
+    let restored = try PhotoFraming.editedPhoto(editURL, flipped: true)
+    check([0.125, 0.375, 0.625, 0.875].allSatisfy {
+        abs(hdrPixel(restored, xFraction: $0) - hdrPixel(imported, xFraction: $0)) < 12
+    }, "Flipping twice restores the original composition for EXIF \(orientation)")
+}
+try hdrFixture(bias: 0, width: 2500, height: 1000).write(to: editURL)
+let boundedEdit = try PhotoFraming.editedPhoto(editURL, flipped: true)
+let boundedPixels = CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithData(boundedEdit as CFData, nil)!, 0, nil)!
+check(boundedPixels.width == 2048 && abs(Double(boundedPixels.height) - 819.2) < 1, "Large imported images retain their aspect with bounded decode")
+try Data("invalid image".utf8).write(to: editURL)
+do {
+    _ = try PhotoFraming.editedPhoto(editURL, flipped: true)
+    fatalError("Editing accepted an invalid image")
+} catch { check(true, "Invalid imported image fails without creating a photo") }
 print("Synthetic media checks passed; iPhone 6 camera and Photos-library tests remain required.")

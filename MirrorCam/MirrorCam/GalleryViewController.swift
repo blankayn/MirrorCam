@@ -1,9 +1,13 @@
 import UIKit
 import AVKit
 import PhotosUI
+import Photos
 
-final class GalleryViewController: UITableViewController {
+final class GalleryViewController: UITableViewController, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
     private var items: [MediaItem] = []
+    private var importing = false
+    private lazy var editButton = UIBarButtonItem(title: "Edit", style: .plain, target: self, action: #selector(editLibrary))
+    private lazy var importButton = UIBarButtonItem(title: "Import", style: .plain, target: self, action: #selector(importPhoto))
     private let formatter: DateFormatter = {
         let formatter = DateFormatter(); formatter.dateStyle = .medium; formatter.timeStyle = .short; return formatter
     }()
@@ -25,7 +29,8 @@ final class GalleryViewController: UITableViewController {
         navigationController?.navigationBar.barStyle = .black
         navigationController?.navigationBar.tintColor = .white
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Camera", style: .done, target: self, action: #selector(close))
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Edit", style: .plain, target: self, action: #selector(editLibrary))
+        navigationItem.rightBarButtonItems = [editButton, importButton]
+        importButton.accessibilityLabel = "Import a photo from Photos to flip it"
         tableView.tableFooterView = UIView()
     }
     override func viewWillAppear(_ animated: Bool) {
@@ -40,7 +45,52 @@ final class GalleryViewController: UITableViewController {
     @objc private func close() { dismiss(animated: true) }
     @objc private func editLibrary() {
         tableView.setEditing(!tableView.isEditing, animated: true)
-        navigationItem.rightBarButtonItem?.title = tableView.isEditing ? "Done" : "Edit"
+        editButton.title = tableView.isEditing ? "Done" : "Edit"
+    }
+    @objc private func importPhoto() {
+        guard !importing else { return }
+        importing = true; importButton.isEnabled = false
+        func openPicker(_ status: PHAuthorizationStatus) {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                var allowed = status == .authorized
+                if #available(iOS 14, *) { allowed = allowed || status == .limited }
+                guard allowed, UIImagePickerController.isSourceTypeAvailable(.photoLibrary) else {
+                    self.importing = false; self.importButton.isEnabled = true
+                    self.showMessage("Allow Photos access in Settings to import a photo.", settings: status == .denied)
+                    return
+                }
+                let picker = UIImagePickerController()
+                picker.sourceType = .photoLibrary; picker.mediaTypes = ["public.image"]
+                picker.allowsEditing = false; picker.delegate = self
+                self.present(picker, animated: true)
+            }
+        }
+        let status = PHPhotoLibrary.authorizationStatus()
+        if status == .notDetermined { PHPhotoLibrary.requestAuthorization { openPicker($0) } }
+        else { openPicker(status) }
+    }
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        importing = false; importButton.isEnabled = true; picker.dismiss(animated: true)
+    }
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+        guard let url = info[.imageURL] as? URL else {
+            importing = false; importButton.isEnabled = true
+            picker.dismiss(animated: true) { self.showMessage("Could not load this photo. Download it from iCloud in Photos and try again.") }
+            return
+        }
+        // Keep the picker and its source file alive until the local copy is complete.
+        picker.view.isUserInteractionEnabled = false
+        MediaStore.shared.addEditedPhoto(from: url, flipped: false) { [weak self] result in
+            guard let self = self else { return }
+            self.importing = false; self.importButton.isEnabled = true
+            picker.dismiss(animated: true) {
+                switch result {
+                case .success(let item): self.navigationController?.pushViewController(MediaDetailViewController(item: item), animated: true)
+                case .failure(let error): self.showMessage(error.localizedDescription)
+                }
+            }
+        }
     }
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { return items.count }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -82,6 +132,9 @@ final class MediaDetailViewController: UIViewController {
     private let saveButton = UIButton(type: .system)
     private let playButton = UIButton(type: .system)
     private let shareButton = UIButton(type: .system)
+    private let flipButton = UIButton(type: .system)
+    private let copyButton = UIButton(type: .system)
+    private var flipped = false, editingPhoto = false
     private let info = UILabel()
     private var player: AVPlayer?
     init(item: MediaItem) { self.item = item; super.init(nibName: nil, bundle: nil) }
@@ -107,7 +160,10 @@ final class MediaDetailViewController: UIViewController {
         separateButton.setTitle("Save photo + video", for: .normal); separateButton.isHidden = item.kind != .livePhoto
         separateButton.isEnabled = !item.savedToPhotos
         shareButton.setTitle("Share", for: .normal)
-        for button in [saveButton, playButton, separateButton, shareButton] {
+        flipButton.setTitle("Flip horizontally", for: .normal); flipButton.isHidden = item.photoURL == nil
+        copyButton.setTitle("Create flipped copy", for: .normal); copyButton.isHidden = true
+        flipButton.accessibilityHint = "Preview the opposite horizontal orientation, then create a copy to keep it."
+        for button in [saveButton, playButton, separateButton, shareButton, flipButton, copyButton] {
             button.tintColor = UIColor(red: 0.45, green: 0.95, blue: 0.82, alpha: 1)
             button.heightAnchor.constraint(equalToConstant: 48).isActive = true
         }
@@ -115,10 +171,12 @@ final class MediaDetailViewController: UIViewController {
         separateButton.addTarget(self, action: #selector(saveSeparate), for: .touchUpInside)
         playButton.addTarget(self, action: #selector(play), for: .touchUpInside)
         shareButton.addTarget(self, action: #selector(share), for: .touchUpInside)
+        flipButton.addTarget(self, action: #selector(toggleFlip), for: .touchUpInside)
+        copyButton.addTarget(self, action: #selector(createFlippedCopy), for: .touchUpInside)
         info.textColor = .lightGray; info.font = .systemFont(ofSize: 12); info.textAlignment = .center; info.numberOfLines = 3
         info.text = item.kind == .livePhoto ? "Touch and hold the photo to animate it.\nSave to Photos imports one Live Photo.\nShare sends the original JPEG and MOV files."
             : (item.kind == .motion ? "This older Motion capture saves as a photo and separate video." : "Captures stay in MirrorCam until you delete them.")
-        let stack = UIStackView(arrangedSubviews: [playButton, saveButton, separateButton, shareButton, info])
+        let stack = UIStackView(arrangedSubviews: [flipButton, copyButton, playButton, saveButton, separateButton, shareButton, info])
         stack.axis = .vertical; stack.spacing = 4; stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -139,21 +197,53 @@ final class MediaDetailViewController: UIViewController {
                 guard !(result[PHLivePhotoInfoIsDegradedKey] as? Bool ?? false) else { return }
                 DispatchQueue.main.async {
                     guard let self = self else { return }
-                    self.liveView.livePhoto = livePhoto; self.liveView.isHidden = livePhoto == nil
-                    if livePhoto == nil { self.info.text = "Live preview is unavailable on this device. Play clip still works. Try Save to Photos, or save the photo + video separately." }
+                    self.liveView.livePhoto = livePhoto; self.liveView.isHidden = livePhoto == nil || self.flipped
+                    if livePhoto == nil && !self.flipped { self.info.text = "Live preview is unavailable on this device. Play clip still works. Try Save to Photos, or save the photo + video separately." }
                 }
             }
         }
     }
 
+    @objc private func toggleFlip() {
+        guard !editingPhoto else { return }
+        flipped.toggle(); liveView.stopPlayback()
+        imageView.transform = flipped ? CGAffineTransform(scaleX: -1, y: 1) : .identity
+        liveView.isHidden = flipped || liveView.livePhoto == nil
+        flipButton.setTitle(flipped ? "Undo flip" : "Flip horizontally", for: .normal)
+        copyButton.isHidden = !flipped
+        saveButton.isHidden = flipped; shareButton.isHidden = flipped
+        playButton.isHidden = flipped || item.videoURL == nil
+        separateButton.isHidden = flipped || item.kind != .livePhoto
+        info.text = flipped ? "Create a flipped still-photo copy, then Save to Photos.\nOriginal stays unchanged. JPEG copies are up to 2048 pixels."
+            : (item.kind == .livePhoto ? "Touch and hold the photo to animate it.\nSave to Photos imports one Live Photo."
+               : "Captures stay in MirrorCam until you delete them.")
+    }
+    @objc private func createFlippedCopy() {
+        guard flipped, !editingPhoto, let url = item.photoURL else { return }
+        editingPhoto = true; flipButton.isEnabled = false; copyButton.isEnabled = false
+        copyButton.setTitle("Creating copy…", for: .normal)
+        MediaStore.shared.addEditedPhoto(from: url, flipped: true) { [weak self] result in
+            guard let self = self else { return }
+            self.editingPhoto = false; self.flipButton.isEnabled = true; self.copyButton.isEnabled = true
+            self.copyButton.setTitle("Create flipped copy", for: .normal)
+            switch result {
+            case .success(let copy):
+                if self.navigationController?.topViewController === self {
+                    self.navigationController?.pushViewController(MediaDetailViewController(item: copy), animated: true)
+                }
+            case .failure(let error): self.showMessage(error.localizedDescription)
+            }
+        }
+    }
     @objc private func save() {
         saveCapture(separate: false)
     }
     @objc private func saveSeparate() { saveCapture(separate: true) }
     private func saveCapture(separate: Bool) {
-        saveButton.isEnabled = false; separateButton.isEnabled = false
+        saveButton.isEnabled = false; separateButton.isEnabled = false; flipButton.isEnabled = false
         MediaStore.shared.saveToPhotos(item, separate: separate) { [weak self] result in
             guard let self = self else { return }
+            self.flipButton.isEnabled = true
             switch result {
             case .success(let item): self.item = item; self.saveButton.setTitle("Saved to Photos", for: .normal)
             case .failure(let error):

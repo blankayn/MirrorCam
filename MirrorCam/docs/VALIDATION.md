@@ -49,3 +49,8 @@ No simulator or physical iPhone 6 test of version 1.3 has been performed. Synthe
 - Downloaded IPA archive integrity passed: version 1.4 (build 5), arm64, minimum OS 12.0 in Info.plist and Mach-O, and 17 embedded Swift libraries. Artifact ZIP SHA-256 `9145f150d2dd8e8725c34f703d8773d19f7b9921fe5a52f907e7963872d2eed1` matches GitHub's digest. IPA SHA-256: `68020c113642b6c142c208e2a3e5b78c161352ddf6750a0d75c7386c8dd69503`.
 
 No simulator or physical-device check of version 1.4 was performed. Existing software media tests cover geometry, image orientation, HDR and LIVE resource generation; they do not exercise the live camera preview, hardware mirroring or preference persistence. Verify readable text in preview and saved media with Mirror Off, then relaunch and switch modes/lenses using `DEVICE-TESTS.md`.
+
+## Version 1.5
+
+- Added Photos import and a horizontal-flip preview in Library. Create flipped copy stores a new still image without modifying the source or a LIVE clip. All EXIF orientations normalize before the horizontal transform; JPEG copies retain the full frame and decode at up to 2048 pixels.
+- Build and synthetic editing checks are pending. Physical-device import, permission, memory, preview and Photos-save checks remain pending.

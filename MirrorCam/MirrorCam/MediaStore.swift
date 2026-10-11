@@ -64,6 +64,17 @@ final class MediaStore {
         }
     }
 
+    func addEditedPhoto(from url: URL, flipped: Bool, completion: @escaping (Result<MediaItem, Error>) -> Void) {
+        queue.async {
+            autoreleasepool {
+                do {
+                    let data = try PhotoFraming.editedPhoto(url, flipped: flipped)
+                    self.add(photo: data, video: nil, mode: .photo, completion: completion)
+                } catch { DispatchQueue.main.async { completion(.failure(error)) } }
+            }
+        }
+    }
+
     static func downsample(_ url: URL, pixels: Int) -> UIImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
