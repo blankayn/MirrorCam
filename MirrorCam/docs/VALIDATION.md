@@ -45,4 +45,7 @@ No simulator or physical iPhone 6 test of version 1.3 has been performed. Synthe
 
 - Windows validation passed **123 structural/syntax checks across eleven Swift files** on 11 October 2026.
 - Mirror On/Off now sets the front preview and capture connections together. The UI waits for the engine to accept the setting and remembers it in UserDefaults. Rear preview remains unmirrored; software LIVE clears its buffer when the setting changes.
-- The iOS build and physical-device checks are pending. Existing software media tests do not exercise the live camera preview or preference persistence.
+- [Cloud run 38128559126](https://github.com/blankayn/MirrorCam/actions/runs/38128559126) at commit `1c71d540307d194815a17eaad7dcea75e83b9d7a`: Xcode 15.4 Release iphoneos build succeeded; all **194 existing synthetic media assertions passed**. Cloud project validation passed 112 checks.
+- Downloaded IPA archive integrity passed: version 1.4 (build 5), arm64, minimum OS 12.0 in Info.plist and Mach-O, and 17 embedded Swift libraries. Artifact ZIP SHA-256 `9145f150d2dd8e8725c34f703d8773d19f7b9921fe5a52f907e7963872d2eed1` matches GitHub's digest. IPA SHA-256: `68020c113642b6c142c208e2a3e5b78c161352ddf6750a0d75c7386c8dd69503`.
+
+No simulator or physical-device check of version 1.4 was performed. Existing software media tests cover geometry, image orientation, HDR and LIVE resource generation; they do not exercise the live camera preview, hardware mirroring or preference persistence. Verify readable text in preview and saved media with Mirror Off, then relaunch and switch modes/lenses using `DEVICE-TESTS.md`.
