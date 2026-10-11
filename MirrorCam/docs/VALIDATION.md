@@ -53,4 +53,8 @@ No simulator or physical-device check of version 1.4 was performed. Existing sof
 ## Version 1.5
 
 - Added Photos import and a horizontal-flip preview in Library. Create flipped copy stores a new still image without modifying the source or a LIVE clip. All EXIF orientations normalize before the horizontal transform; JPEG copies retain the full frame and decode at up to 2048 pixels.
-- Build and synthetic editing checks are pending. Physical-device import, permission, memory, preview and Photos-save checks remain pending.
+- Windows structural/syntax validation passed **123 checks across eleven Swift files**.
+- [Cloud run 38129097788](https://github.com/blankayn/MirrorCam/actions/runs/38129097788) at commit `2ce0d92701d417dc608822b99e8f32eff41956ab`: Xcode 15.4 Release iphoneos build succeeded; **245 synthetic media assertions passed**. These include the previous 194 and 51 additional fixture/editing assertions covering all eight EXIF orientations, horizontal reversal without vertical inversion, two flips restoring composition, full framing, removal of pairing metadata, bounded decoding and invalid input.
+- Downloaded IPA verified: version 1.5 (build 6), arm64, minimum OS 12.0 in Info.plist and Mach-O, 17 embedded Swift libraries and valid ZIP integrity. Artifact ZIP SHA-256 `3bded68ca94a59808af955099b7a4de78e27d02dcfc242da8a8bbfd8b704e6ec` matches GitHub's digest. IPA SHA-256: `c6c206301ae4f3a67a532059d51be500d5f1b56eb708619cc6c5c8318f655507`.
+
+No simulator or physical-device execution of version 1.5 was performed. Photos import (including iCloud/HEIC), permission recovery, UI preview, device memory use and saving the new copy into iOS 12 Photos remain pending in `DEVICE-TESTS.md`.
