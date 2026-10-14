@@ -98,7 +98,8 @@ final class GalleryViewController: UITableViewController, UIImagePickerControlle
         let item = items[indexPath.row]
         cell.backgroundColor = .black; cell.textLabel?.textColor = .white; cell.detailTextLabel?.textColor = .lightGray
         cell.textLabel?.text = item.kind == .livePhoto ? "LIVE Photo" : (item.kind == .motion ? "Motion photo + clip" : item.kind.rawValue.capitalized)
-        cell.detailTextLabel?.text = formatter.string(from: item.created) + (item.savedToPhotos ? " · In Photos" : " · Local")
+        let savedLabel = item.kind == .livePhoto && item.livePhotoVerified == true ? " · LIVE verified in Photos" : " · In Photos"
+        cell.detailTextLabel?.text = formatter.string(from: item.created) + (item.savedToPhotos ? savedLabel : " · Local")
         cell.imageView?.image = UIImage(contentsOfFile: item.thumbnailURL.path)
         cell.imageView?.contentMode = .scaleAspectFit
         cell.accessoryType = .disclosureIndicator
@@ -128,7 +129,7 @@ final class MediaDetailViewController: UIViewController {
     private let imageView = UIImageView()
     private let liveView = PHLivePhotoView()
     private let separateButton = UIButton(type: .system)
-    private var liveRequest: PHLivePhotoRequestID?
+    private var liveRequest: LivePhotoPreviewRequest?
     private let saveButton = UIButton(type: .system)
     private let playButton = UIButton(type: .system)
     private let shareButton = UIButton(type: .system)
@@ -143,6 +144,9 @@ final class MediaDetailViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = item.kind == .livePhoto ? "LIVE Photo" : (item.kind == .motion ? "Motion" : item.kind.rawValue.capitalized)
+        if item.kind == .livePhoto {
+            navigationItem.rightBarButtonItem = UIBarButtonItem(title: "LIVE details", style: .plain, target: self, action: #selector(liveDetails))
+        }
         view.backgroundColor = .black
         imageView.contentMode = .scaleAspectFit
         imageView.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(imageView)
@@ -174,7 +178,7 @@ final class MediaDetailViewController: UIViewController {
         flipButton.addTarget(self, action: #selector(toggleFlip), for: .touchUpInside)
         copyButton.addTarget(self, action: #selector(createFlippedCopy), for: .touchUpInside)
         info.textColor = .lightGray; info.font = .systemFont(ofSize: 12); info.textAlignment = .center; info.numberOfLines = 3
-        info.text = item.kind == .livePhoto ? "Touch and hold the photo to animate it.\nSave to Photos imports one Live Photo.\nShare sends the original JPEG and MOV files."
+        info.text = item.kind == .livePhoto ? "Touch and hold the photo to animate it.\nSave to Photos pairs the JPEG and MOV, then verifies the saved asset."
             : (item.kind == .motion ? "This older Motion capture saves as a photo and separate video." : "Captures stay in MirrorCam until you delete them.")
         let stack = UIStackView(arrangedSubviews: [flipButton, copyButton, playButton, saveButton, separateButton, shareButton, info])
         stack.axis = .vertical; stack.spacing = 4; stack.translatesAutoresizingMaskIntoConstraints = false
@@ -192,16 +196,18 @@ final class MediaDetailViewController: UIViewController {
             DispatchQueue.main.async { self?.imageView.image = image }
         }
         if item.kind == .livePhoto, let photo = item.photoURL, let video = item.videoURL {
-            liveRequest = PHLivePhoto.request(withResourceFileURLs: [photo, video], placeholderImage: nil,
-                targetSize: CGSize(width: 750, height: 1000), contentMode: .aspectFit) { [weak self] livePhoto, result in
-                guard !(result[PHLivePhotoInfoIsDegradedKey] as? Bool ?? false) else { return }
-                DispatchQueue.main.async {
+            liveRequest = LivePhotoPreviewRequest(photo: photo, movie: video,
+                size: CGSize(width: 750, height: 1000)) { [weak self] result in
                     guard let self = self else { return }
-                    self.liveView.livePhoto = livePhoto; self.liveView.isHidden = livePhoto == nil || self.flipped
-                    if livePhoto == nil && !self.flipped { self.info.text = "Live preview is unavailable on this device. Play clip still works. Try Save to Photos, or save the photo + video separately." }
-                }
+                    switch result {
+                    case .success(let photo): self.liveView.livePhoto = photo; self.liveView.isHidden = self.flipped
+                    case .failure(let error):
+                        self.liveView.isHidden = true
+                        if !self.flipped { self.info.text = "\(error.localizedDescription)\nOpen LIVE details for diagnostics. Photos import can be checked separately." }
+                    }
             }
         }
+        updatePhotosLabel()
     }
 
     @objc private func toggleFlip() {
@@ -245,7 +251,11 @@ final class MediaDetailViewController: UIViewController {
             guard let self = self else { return }
             self.flipButton.isEnabled = true
             switch result {
-            case .success(let item): self.item = item; self.saveButton.setTitle("Saved to Photos", for: .normal)
+            case .success(let item):
+                self.item = item; self.updatePhotosLabel()
+                if item.kind == .livePhoto && !separate && item.livePhotoVerified != true {
+                    self.showMessage(item.photosVerificationMessage ?? "Photos saved this item, but Live Photo verification is unavailable.")
+                }
             case .failure(let error):
                 self.saveButton.isEnabled = true; self.separateButton.isEnabled = true
                 self.showMessage(error.localizedDescription, settings: PHPhotoLibrary.authorizationStatus() == .denied)
@@ -256,7 +266,58 @@ final class MediaDetailViewController: UIViewController {
         if gesture.state == .began { liveView.startPlayback(with: .full) }
         else if gesture.state == .ended || gesture.state == .cancelled { liveView.stopPlayback() }
     }
-    deinit { if let request = liveRequest { PHLivePhoto.cancelRequest(withRequestID: request) } }
+    deinit { liveRequest?.cancel() }
+    private func updatePhotosLabel() {
+        guard item.savedToPhotos else { return }
+        saveButton.isEnabled = false; separateButton.isEnabled = false
+        saveButton.setTitle(item.livePhotoVerified == true ? "LIVE verified in Photos" : "Saved to Photos", for: .normal)
+        if item.kind == .livePhoto && !flipped {
+            info.text = item.savedSeparately == true ? "Saved as a separate photo and video. This export is not a Live Photo."
+                : (item.photosVerificationMessage ?? "Saved earlier; Live Photo subtype has not been verified.")
+        }
+    }
+    @objc private func liveDetails() {
+        let alert = UIAlertController(title: "LIVE details", message: "Pair metadata and Photos asset checks are separate from playback and third-party app compatibility.", preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "Inspect JPEG + MOV pair", style: .default) { [weak self] _ in
+            guard let self = self, let photo = self.item.photoURL, let movie = self.item.videoURL else { return }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = Result { try LivePhotoSupport.validate(photo: photo, movie: movie) }
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let report): self.showMessage(report.summary)
+                    case .failure(let error):
+                        LivePhotoDiagnostics.record("pair-inspection-error", error.localizedDescription)
+                        self.showMessage(error.localizedDescription)
+                    }
+                }
+            }
+        })
+        let verify = UIAlertAction(title: "Verify in Photos", style: .default) { [weak self] _ in
+            guard let self = self else { return }
+            MediaStore.shared.verifyInPhotos(self.item) { [weak self] result in
+                guard let self = self else { return }
+                switch result {
+                case .success(let item):
+                    self.item = item; self.updatePhotosLabel()
+                    self.showMessage(item.photosVerificationMessage ?? "Verification unavailable.", settings: PHPhotoLibrary.authorizationStatus() == .denied)
+                case .failure(let error): self.showMessage(error.localizedDescription)
+                }
+            }
+        }
+        verify.isEnabled = item.savedToPhotos && item.savedSeparately != true
+        alert.addAction(verify)
+        alert.addAction(UIAlertAction(title: "Share diagnostic log", style: .default) { [weak self] _ in
+            LivePhotoDiagnostics.snapshot { [weak self] log in
+                guard let self = self else { return }
+                let share = UIActivityViewController(activityItems: [log], applicationActivities: nil)
+                share.popoverPresentationController?.barButtonItem = self.navigationItem.rightBarButtonItem
+                self.present(share, animated: true)
+            }
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.popoverPresentationController?.barButtonItem = navigationItem.rightBarButtonItem
+        present(alert, animated: true)
+    }
     @objc private func play() {
         guard let url = item.videoURL else { return }
         let controller = AVPlayerViewController()

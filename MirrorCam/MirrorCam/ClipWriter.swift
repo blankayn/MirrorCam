@@ -36,6 +36,12 @@ final class ClipWriter {
         self.queue = queue
         maximumPendingFrames = motion ? 64 : 8
         start = CMSampleBufferGetPresentationTimeStamp(firstVideo)
+        if motion {
+            guard let time = stillTime, time.isValid, CMTimeGetSeconds(time).isFinite,
+                  CMTimeCompare(time, start) >= 0 else {
+                throw CameraError.message("LIVE recording requires a valid key-photo timestamp inside its timeline.")
+            }
+        }
         guard let pixels = CMSampleBufferGetImageBuffer(firstVideo) else {
             throw CameraError.message("The camera did not provide a video frame.")
         }
@@ -72,12 +78,12 @@ final class ClipWriter {
         if let identifier = assetIdentifier, let stillTime = stillTime {
             let item = AVMutableMetadataItem()
             item.keySpace = .quickTimeMetadata
-            item.key = "com.apple.quicktime.content.identifier" as NSString
+            item.key = LivePhotoSupport.contentIdentifierKey as NSString
             item.value = identifier as NSString
             item.dataType = "com.apple.metadata.datatype.UTF-8"
             writer.metadata = [item]
             let spec: [String: Any] = [
-                kCMMetadataFormatDescriptionMetadataSpecificationKey_Identifier as String: "mdta/com.apple.quicktime.still-image-time",
+                kCMMetadataFormatDescriptionMetadataSpecificationKey_Identifier as String: "mdta/\(LivePhotoSupport.stillImageTimeKey)",
                 kCMMetadataFormatDescriptionMetadataSpecificationKey_DataType as String: "com.apple.metadata.datatype.int8"
             ]
             var description: CMFormatDescription?
@@ -92,10 +98,11 @@ final class ClipWriter {
             metadata = AVAssetWriterInputMetadataAdaptor(assetWriterInput: input)
             let marker = AVMutableMetadataItem()
             marker.keySpace = .quickTimeMetadata
-            marker.key = "com.apple.quicktime.still-image-time" as NSString
+            marker.key = LivePhotoSupport.stillImageTimeKey as NSString
             marker.value = NSNumber(value: Int8(0))
             marker.dataType = "com.apple.metadata.datatype.int8"
             stillMarker = AVTimedMetadataGroup(items: [marker], timeRange: CMTimeRange(start: stillTime, duration: CMTime(value: 1, timescale: 15)))
+            LivePhotoDiagnostics.record("writer-start", "Pair \(identifier); key photo at \(CMTimeGetSeconds(CMTimeSubtract(stillTime, start)))s; audio \(hasAudio)")
         } else { metadata = nil }
         guard writer.startWriting() else { throw writer.error ?? CameraError.message("Cannot start recording.") }
         writer.startSession(atSourceTime: start)
@@ -174,6 +181,9 @@ final class ClipWriter {
         }
         video.markAsFinished(); audio?.markAsFinished(); metadata?.assetWriterInput.markAsFinished()
         writer.finishWriting { [self] in
+            if let identifier = assetIdentifier {
+                LivePhotoDiagnostics.record("writer-finish", "Pair \(identifier); status \(writer.status.rawValue); frames \(frameCount)")
+            }
             if writer.status == .completed { completion(.success(url)) }
             else {
                 try? FileManager.default.removeItem(at: url)
@@ -183,6 +193,7 @@ final class ClipWriter {
     }
 
     private func fail(_ error: Error) {
+        if assetIdentifier != nil { LivePhotoDiagnostics.record("writer-error", error.localizedDescription) }
         terminalError = error
         finalizing = true
         writer.cancelWriting(); pendingVideo.removeAll(); pendingAudio.removeAll()

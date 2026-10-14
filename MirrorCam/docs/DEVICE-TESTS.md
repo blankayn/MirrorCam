@@ -1,6 +1,6 @@
 # Device acceptance checklist
 
-Version 1.0: the user reports successful installation and launch. The following detailed checks and version 1.1/1.2/1.3/1.4/1.5 runtime checks remain pending.
+Version 1.0: the user reports successful installation and launch. The following detailed checks and version 1.1/1.2/1.3/1.4/1.5/1.6 runtime checks remain pending.
 
 Use a physical iPhone 6 on iOS 12. Record the OS patch, Xcode version, build log, and results. A successful Windows structural/syntax check is not an iOS build or runtime pass.
 
@@ -32,13 +32,10 @@ Use a physical iPhone 6 on iOS 12. Record the OS patch, Xcode version, build log
 | Video mirroring | Front On and Off match the live preview and requested saved mirroring; rear remains normal. |
 | Video torch | Rear Flash On illuminates during recording and turns off at stop/background. |
 | Motion full pre-roll | Wait for LIVE ready, move a numbered card before shutter and after; resulting clip shows both sides of shutter and is roughly 3 s long. |
-| Motion early shutter | Just after mode entry, either warming-up feedback or a shorter lead-in; never a crash. |
-| LIVE pair | JPEG still and MOV show consistent orientation and mirror state; gallery displays still and plays clip. |
-| Iris12 default | After a fresh launch the experiment is off; software LIVE still works. |
-| Iris12 enable/status | In LIVE, tap 4:3 · Max → Try Iris12 native capture. LIVE capture status reports hook/configuration results; unsupported capture returns to software with a reason. |
-| Iris12 front/rear | If accepted, capture on each camera, verify pre/post-shutter motion and audio, hold in Library, save to Photos and hold there. Acceptance flags alone do not pass this check. |
-| Iris12 framing/mirror | Native mode shows a 4:3 maximum-resolution frame, disables alternate sizes, preserves 1× framing and saved Mirror On/Off in portrait/landscape. |
-| Iris12 recovery | Exercise lens/mode changes, background/interruption, native rejection and timeout. UI recovers, original methods restore on disable, and software captures remain available. Record any unexpected exit and reopen with the experiment off. |
+| Motion early shutter | Just after mode entry, warm-up feedback prevents a partial lead-in; never a crash. |
+| LIVE pair | JPEG/MOV identifiers match, typed timed track places the shutter near the middle, mirroring/framing match; hold in PHLivePhotoView to animate. |
+| LIVE saved subtype | Save to Photos creates one asset; fetch by recorded identifier confirms photoLive. UI says LIVE verified only on a passed check. Reverify creates no duplicate. |
+| LIVE diagnostics | LIVE details displays pair inspection, verification message and shareable bounded log. Missing resources, denied access, rejected import or preview timeout report failures explicitly. |
 | Buffer reset | Switch, rotate or toggle mirror in Motion; no stale frames from the previous configuration. |
 | Rotation | Capture photos and videos held portrait, upside-down and both landscapes; saved files appear upright in Photos and playback. Change orientation while recording: clip dimensions stay stable. |
 | Fast shutter taps | No duplicate photos, overlapping writers, stuck recording state or unexpected mode changes. |
@@ -64,3 +61,7 @@ Inspect video properties (duration, dimensions, audio track) on macOS with AVAss
 - LIVE: capture motion and sound, hold the Library photo to animate, release to stop, and play the clip separately. Save to Photos must create one asset showing the LIVE badge and press-and-hold animation.
 - LIVE fallback: if import fails, local JPEG/MOV remain playable. Save photo + video must create two assets only when explicitly chosen.
 - Old version 1.0 Photo/Video/Motion captures must still load after installing the update over the app with the same signing account and bundle ID.
+
+## Version 1.6 public Live Photos
+
+Run the full on-device sequence in [LIVE-PHOTOS.md](LIVE-PHOTOS.md), including independent Photos playback and subtype checks. Keep Instagram results separate; no native Photos or Instagram compatibility is claimed before a recorded device pass. The Iris12 experiment is removed from the app target.

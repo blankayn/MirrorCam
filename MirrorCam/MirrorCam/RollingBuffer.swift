@@ -14,9 +14,17 @@ final class RollingBuffer {
     func clear() { video.removeAll(); audio.removeAll() }
 
     func appendVideo(_ sample: CMSampleBuffer) {
+        let now = CMSampleBufferGetPresentationTimeStamp(sample)
+        guard now.isValid, CMTimeGetSeconds(now).isFinite else { return }
+        if let previous = lastTime {
+            let gap = CMTimeGetSeconds(CMTimeSubtract(now, previous))
+            if gap <= 0 || gap > 0.5 {
+                clear()
+                LivePhotoDiagnostics.record("buffer-reset", "Video timeline discontinuity: \(gap)s")
+            }
+        }
         guard let copy = Self.copyVideo(sample) else { return }
         video.append(copy)
-        let now = CMSampleBufferGetPresentationTimeStamp(sample)
         video.removeAll { CMTimeGetSeconds(CMTimeSubtract(now, CMSampleBufferGetPresentationTimeStamp($0))) > duration }
         // A hard ceiling guards against unexpected frame-rate/timestamp behavior.
         if video.count > 25 { video.removeFirst(video.count - 25) }

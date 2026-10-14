@@ -91,6 +91,9 @@ for image in json.loads((catalog / "Contents.json").read_text())["images"]:
 
 swift = list(source.glob("*.swift"))
 check(not any("import SwiftUI" in p.read_text(encoding="utf-8") for p in swift), "UIKit sources contain no SwiftUI import")
+app_text = "\n".join(p.read_text(encoding="utf-8") for p in swift)
+check(not any(word in app_text for word in ["MCIris", "MCSetLivePhotoEnabled", "MCCaptureNativeLivePhoto", "MobileSubstrate", "NSClassFromString", "method_setImplementation"]), "App contains no Iris/private capability hooks")
+check("SWIFT_OBJC_BRIDGING_HEADER" not in project and not list(source.glob("*.m")), "App target has no private runtime bridging source")
 sys.path.insert(0, str(root / "build/validation-tools"))
 try:
     import tree_sitter

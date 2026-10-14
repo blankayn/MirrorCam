@@ -58,7 +58,7 @@ enum PhotoFraming {
         }
         var metadata: [String: Any] = [kCGImageDestinationLossyCompressionQuality as String: 0.94,
                                        kCGImagePropertyOrientation as String: 1]
-        if let identifier = identifier { metadata[kCGImagePropertyMakerAppleDictionary as String] = ["17": identifier] }
+        if let identifier = identifier { metadata[kCGImagePropertyMakerAppleDictionary as String] = [LivePhotoSupport.makerIdentifierKey: identifier] }
         CGImageDestinationAddImage(destination, cgImage, metadata as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw CameraError.message("Could not save the photo frame.") }
         return data as Data

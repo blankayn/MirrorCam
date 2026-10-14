@@ -58,3 +58,9 @@ No simulator or physical-device check of version 1.4 was performed. Existing sof
 - Downloaded IPA verified: version 1.5 (build 6), arm64, minimum OS 12.0 in Info.plist and Mach-O, 17 embedded Swift libraries and valid ZIP integrity. Artifact ZIP SHA-256 `3bded68ca94a59808af955099b7a4de78e27d02dcfc242da8a8bbfd8b704e6ec` matches GitHub's digest. IPA SHA-256: `c6c206301ae4f3a67a532059d51be500d5f1b56eb708619cc6c5c8318f655507`.
 
 No simulator or physical-device execution of version 1.5 was performed. Photos import (including iCloud/HEIC), permission recovery, UI preview, device memory use and saving the new copy into iOS 12 Photos remain pending in `DEVICE-TESTS.md`.
+
+## Version 1.6
+
+14 October 2026: Windows validation passed **122 structural/syntax checks across twelve Swift files**. The app target has no Objective-C hook source, bridging header or Iris capability calls. The new public-API helper validates generated resources, times out preview loading and records bounded logs. Saved Photos identifiers and subtype verification state are optional fields for backward-compatible local JSON.
+
+Cloud build and expanded synthetic tests are pending. No simulator execution, iOS 12 Photos asset import/subtype verification, physical-device playback or Instagram test has been performed. Follow `LIVE-PHOTOS.md` for the separate device acceptance checks; the historical records above describe older builds, including the removed experiment.

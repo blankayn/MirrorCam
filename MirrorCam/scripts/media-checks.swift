@@ -149,7 +149,113 @@ for aspect in PhotoAspect.allCases {
     let deadline = Date().addingTimeInterval(20)
     while !loaded && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
     check(loaded && liveValid, "PhotoKit recognizes \(aspect.title) resources as one Live Photo")
+    let report = try LivePhotoSupport.validate(photo: photo, movie: movie)
+    check(report.identifier == id && abs(report.stillTime - 22.0 / 15.0) < 0.01, "Pair validator reads matching identifiers and shutter marker")
+    check(abs(report.duration - 3) < 0.1 && !report.hasAudio, "Pair validator reads actual video duration and silent capture")
+    check(report.videoSize == expectedSize && report.photoSize == expectedSize, "Pair validator confirms matching frame geometry")
+
+    let badPhoto = photo.deletingLastPathComponent().appendingPathComponent("mismatched-\(aspect.rawValue).jpg")
+    let wrongIdentifier = try PhotoFraming.still(CMSampleBufferGetImageBuffer(samples[22])!, options: options, identifier: UUID().uuidString)
+    try wrongIdentifier.write(to: badPhoto)
+    do {
+        _ = try LivePhotoSupport.validate(photo: badPhoto, movie: movie)
+        fatalError("Pair validator accepted a mismatched identifier")
+    } catch { check(true, "Pair validator rejects mismatched JPEG/MOV identifiers") }
+    try PhotoFraming.process(photoData, options: options).write(to: badPhoto)
+    do {
+        _ = try LivePhotoSupport.validate(photo: badPhoto, movie: movie)
+        fatalError("Pair validator accepted a JPEG without pairing metadata")
+    } catch { check(true, "Pair validator rejects JPEG without pairing metadata") }
 }
+
+rolling.appendVideo(try makeSample(100))
+check(rolling.video.count == 1 && rolling.span == 0, "Timestamp gap resets pre-roll rather than including stale frames")
+rolling.appendVideo(try makeSample(99))
+check(rolling.video.count == 1 && rolling.span == 0, "Regressing camera timestamp resets the rolling buffer")
+do {
+    _ = try ClipWriter(url: URL(fileURLWithPath: "build/no-marker.mov"), firstVideo: samples[0], hasAudio: false, motion: true, queue: work)
+    fatalError("Writer accepted LIVE capture without a shutter marker")
+} catch { check(true, "LIVE writer requires a shutter timestamp") }
+
+// A real MOV with an identifier but no timed metadata must not pass as a Live Photo.
+let incompleteURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/no-timed-track.mov")
+try? FileManager.default.removeItem(at: incompleteURL)
+let incompleteWriter = try AVAssetWriter(outputURL: incompleteURL, fileType: .mov)
+let incompleteInput = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 480, AVVideoHeightKey: 640])
+let incompleteIdentifier = UUID().uuidString
+let incompleteMetadata = AVMutableMetadataItem()
+incompleteMetadata.keySpace = .quickTimeMetadata; incompleteMetadata.key = "com.apple.quicktime.content.identifier" as NSString
+incompleteMetadata.value = incompleteIdentifier as NSString; incompleteMetadata.dataType = "com.apple.metadata.datatype.UTF-8"
+incompleteWriter.metadata = [incompleteMetadata]; incompleteWriter.add(incompleteInput)
+check(incompleteWriter.startWriting(), "Incomplete MOV fixture begins writing")
+incompleteWriter.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(samples[0]))
+let fixtureDeadline = Date().addingTimeInterval(5)
+while !incompleteInput.isReadyForMoreMediaData && Date() < fixtureDeadline { Thread.sleep(forTimeInterval: 0.01) }
+check(incompleteInput.append(samples[0]), "Incomplete MOV fixture appends a real H264 frame")
+incompleteInput.markAsFinished()
+let fixtureSemaphore = DispatchSemaphore(value: 0)
+incompleteWriter.finishWriting { fixtureSemaphore.signal() }
+check(fixtureSemaphore.wait(timeout: .now() + 10) == .success && incompleteWriter.status == .completed, "Incomplete MOV fixture finalizes")
+let incompletePhoto = incompleteURL.deletingPathExtension().appendingPathExtension("jpg")
+try PhotoFraming.still(CMSampleBufferGetImageBuffer(samples[0])!, options: PhotoOptions(), identifier: incompleteIdentifier).write(to: incompletePhoto)
+do {
+    _ = try LivePhotoSupport.validate(photo: incompletePhoto, movie: incompleteURL)
+    fatalError("Pair validator accepted a movie without still-image-time track")
+} catch { check(true, "Pair validator rejects MOV without a timed key-photo track") }
+
+// Exercise the existing PCM -> AAC path with the same source timeline as video.
+func makeAudio(_ index: Int) throws -> CMSampleBuffer {
+    let count = 4410
+    var format = AudioStreamBasicDescription(mSampleRate: 44100, mFormatID: kAudioFormatLinearPCM,
+        mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+        mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1,
+        mBitsPerChannel: 16, mReserved: 0)
+    var description: CMAudioFormatDescription?
+    guard CMAudioFormatDescriptionCreate(allocator: kCFAllocatorDefault, asbd: &format, layoutSize: 0,
+        layout: nil, magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &description) == noErr else {
+        throw CameraError.message("Synthetic audio format failed")
+    }
+    var block: CMBlockBuffer?
+    guard CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil,
+        blockLength: count * 2, blockAllocator: kCFAllocatorDefault, customBlockSource: nil,
+        offsetToData: 0, dataLength: count * 2, flags: 0, blockBufferOut: &block) == noErr, let buffer = block else {
+        throw CameraError.message("Synthetic audio buffer failed")
+    }
+    CMBlockBufferFillDataBytes(with: 0, blockBuffer: buffer, offsetIntoDestination: 0, dataLength: count * 2)
+    var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 44100),
+        presentationTimeStamp: CMTime(value: Int64(4410000 + index * count), timescale: 44100), decodeTimeStamp: .invalid)
+    var size = 2
+    var sample: CMSampleBuffer?
+    guard CMSampleBufferCreateReady(allocator: kCFAllocatorDefault, dataBuffer: buffer,
+        formatDescription: description, sampleCount: count, sampleTimingEntryCount: 1,
+        sampleTimingArray: &timing, sampleSizeEntryCount: 1, sampleSizeArray: &size, sampleBufferOut: &sample) == noErr,
+        let result = sample else { throw CameraError.message("Synthetic audio sample failed") }
+    return result
+}
+let audioURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/live-with-audio.mov")
+try? FileManager.default.removeItem(at: audioURL)
+let audioClip = try ClipWriter(url: audioURL, firstVideo: samples[0], hasAudio: true, motion: true,
+    queue: work, aspect: .full, stillTime: CMSampleBufferGetPresentationTimeStamp(samples[22]))
+let audioSamples = try (0..<30).map(makeAudio)
+let audioSemaphore = DispatchSemaphore(value: 0)
+var audioResult: Result<URL, Error>?
+work.async {
+    do {
+        for sample in samples { try audioClip.append(sample, isVideo: true) }
+        for sample in audioSamples { try audioClip.append(sample, isVideo: false) }
+        audioClip.finish { audioResult = $0; audioSemaphore.signal() }
+    } catch { audioResult = .failure(error); audioSemaphore.signal() }
+}
+check(audioSemaphore.wait(timeout: .now() + 20) == .success, "LIVE audio/video writer completes")
+_ = try audioResult!.get()
+let audioPhoto = audioURL.deletingPathExtension().appendingPathExtension("jpg")
+try PhotoFraming.still(CMSampleBufferGetImageBuffer(samples[22])!, options: PhotoOptions(), identifier: audioClip.assetIdentifier).write(to: audioPhoto)
+let audioReport = try LivePhotoSupport.validate(photo: audioPhoto, movie: audioURL)
+check(audioReport.hasAudio && abs(audioReport.duration - 3) < 0.1, "Generated LIVE pair includes AAC audio and a three-second video")
+let audioAsset = AVURLAsset(url: audioURL)
+let audioTrack = audioAsset.tracks(withMediaType: .audio).first!
+check(abs(CMTimeGetSeconds(audioTrack.timeRange.start)) < 0.15 && abs(CMTimeGetSeconds(audioTrack.timeRange.duration) - 3) < 0.15,
+    "AAC audio retains the video source timeline")
 // Exercise the actual three-exposure HDR merger, including clipping and mirrored metadata.
 func hdrFixture(bias: Float, orientation: Int = 1, width: Int = 320, height: Int = 240, shift: Int = 0, verticalShift: Int = 0) -> Data {
     let bitmap = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,

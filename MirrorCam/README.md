@@ -12,13 +12,12 @@ A native Swift / UIKit camera project for **iPhone 6, iOS 12.0 or later**. Uses 
 | HDR | Photo-only Off/On control where three-exposure bracketing is supported. Combines dark/normal/bright exposures, translation alignment and tone mapping into one JPEG. Flash stays off, HDR has a 1600-pixel maximum long edge; a failed merge saves a regular photo with a message. |
 | Mirror | **Mirror On/Off** flips both the front preview and future saved photos, videos and LIVE captures. Mirror Off shows the natural, unmirrored orientation. The choice persists across launches; rear-camera output remains unmirrored. |
 | Video | H.264 MP4, target 720p / 30 fps, AAC microphone audio when permitted, start/stop shutter, elapsed timer. Rear flash On uses the torch during recording. |
-| LIVE | Software-created JPEG + MOV Live Photo, VGA video at 15 fps, approximately 1.5 seconds before and after shutter. Touch and hold in Library to animate; Save to Photos imports a single Live Photo asset. |
-| Iris12 experiment | Optional iOS 12 capability overrides reverse engineered from Michael Melita's Iris12 0.0.2. Tries native `AVCapturePhotoOutput` Live Photos inside MirrorCam, reverting to software LIVE on a reported rejection/error/timeout. Physical-device outcome is unverified. |
+| LIVE | Public-API paired JPEG + MOV with matching identifiers and a timed key-photo track, VGA video at 15 fps, approximately 1.5 seconds before/after shutter. Touch and hold in Library; Save to Photos then checks the saved asset’s photoLive subtype. |
 | Controls | Front/back switch, thirds grid, 0 / 3 / 10 second countdown, flash Off/Auto/On for photos where supported, flash Off/On for video, pinch zoom capped at 4× or the hardware limit. |
 | Library | Local persistent gallery with “by kirtdmno” in its header, Photos import, horizontal-flip preview and still-photo copies, video playback, sharing, save to Photos, and local deletion. |
 | Permissions | Camera required. Microphone requested on first entering Video/LIVE; denial allows silent recording. Photos requested on **Import** or **Save to Photos**; denial preserves local captures. |
 
-Apple does not advertise native Live Photo capture on iPhone 6. The default LIVE mode uses a rolling video buffer and builds a JPEG + QuickTime MOV pair with a shared content identifier and timed key-photo marker, using public frameworks without a jailbreak. PhotoKit imports these resources as one Live Photo. The optional Iris12 experiment uses private runtime capability overrides inside this app; it is off at launch. See [`docs/IRIS12-ANALYSIS.md`](docs/IRIS12-ANALYSIS.md) for the binary findings and experiment limits. If PhotoKit rejects an import, the local capture remains available and **Save photo + video** provides an explicit fallback. Older Motion captures remain readable as separate-media pairs. Photos playback/import still needs verification on your iPhone 6.
+LIVE uses a rolling buffer and builds an Apple-compatible JPEG + QuickTime MOV pair with a shared identifier and timed key-photo marker. PhotoKit imports both resources in one creation request; MirrorCam fetches the resulting asset to verify `photoLive` and reports failures explicitly. The Iris12 runtime hooks and bridge have been removed. Existing captures remain readable. See [`docs/LIVE-PHOTOS.md`](docs/LIVE-PHOTOS.md) for the study of both reference repositories, public-API implementation, integration instructions, diagnostics and full iPhone 6/iOS 12 test procedure. Actual Photos playback/import and Instagram compatibility remain unverified until tested on the device.
 
 The UI stays in portrait, while device rotation controls the saved media orientation. On iPhone 6 at standard display size (375 × 667 points), the default photo layout has a 44-point toolbar, full-width 375 × 500-point 4:3 preview and 123-point shutter area, modeled on the original Camera. The size/zoom bar overlays the preview. Video uses a full-width 16:9 preview behind the controls. Smaller displays adapt to available space. The default 4:3 frame retains the full sensor view; square and 16:9 intentionally crop both preview and output. Resolution choices only downsample and never add zoom. Still/video stabilization is disabled to avoid stabilization crops. Saved photos normalize orientation/mirroring into upright pixels. The gallery uses aspect-fit display, so its display size can differ while relative framing stays the same. Mirror On/Off keeps front preview and output in the selected orientation without changing framing or zoom.
 
@@ -35,11 +34,9 @@ MirrorCam/
 │   ├── ClipWriter.swift
 │   ├── RollingBuffer.swift
 │   ├── FrameGeometry.swift
+│   ├── LivePhotoSupport.swift
 │   ├── PhotoFraming.swift
 │   ├── HDRProcessor.swift
-│   ├── IrisCompatibility.h
-│   ├── IrisCompatibility.m
-│   ├── MirrorCam-Bridging-Header.h
 │   ├── CameraViewController.swift
 │   ├── CameraViews.swift
 │   ├── MediaStore.swift
@@ -54,7 +51,8 @@ MirrorCam/
 │   └── generate-icons.py
 └── docs/
     ├── DEVICE-TESTS.md
-    ├── IRIS12-ANALYSIS.md
+    ├── LIVE-PHOTOS.md
+    ├── IRIS12-ANALYSIS.md          # Historical analysis only; no hooks in app
     └── VALIDATION.md
 ```
 
@@ -132,11 +130,15 @@ Free-account signing normally expires after 7 days and is subject to Apple's app
 
 All capture-session mutation and sample-buffer handling runs on one serial queue. Heavy disk work uses a separate media queue; UI updates run on the main queue. Motion copies YUV pixels out of capture's reusable pool, retaining at most 25 VGA frames (around 12 MB plus padding) and a bounded audio window. The writer drains bounded queues to preserve pre-roll while the hardware encoder starts; video backpressure can drop frames rather than accumulate memory indefinitely. JPEG thumbnails are downsampled for the gallery.
 
-Entering LIVE, switching lenses, rotating, toggling mirroring, or returning from the background resets the pre-roll. Wait for **LIVE ready** for a full lead-in; early captures have a shorter lead-in. Photo mode uses high-resolution still capture. LIVE extracts its key photo from the buffered video frame at shutter time to preserve framing and avoid a photo-output stall; the still is therefore limited to VGA resolution. Flash is disabled in LIVE. Changing framing or zoom also resets the lead-in buffer. Slow hardware, interruptions, and dropped frames can affect the exact clip length; the target is approximately three seconds, not frame-accurate native Live Photo timing.
+Entering LIVE, switching lenses, rotating, toggling mirroring, or returning from the background resets the pre-roll. Wait for **LIVE ready** for a full lead-in; early captures show warm-up guidance until a full lead-in is available. Photo mode uses high-resolution still capture. LIVE extracts its key photo from the buffered video frame at shutter time to preserve framing and avoid a photo-output stall; the still is therefore limited to VGA resolution. Flash is disabled in LIVE. Changing framing or zoom also resets the lead-in buffer. Slow hardware, interruptions, and dropped frames can affect the exact clip length; the target is approximately three seconds, not frame-accurate native Live Photo timing.
 
 Leaving the app stops video and attempts to finalize it with a short background task. In-progress Motion capture is cancelled on interruptions/backgrounding. The app does not continue camera capture in the background. Captures are stored under Application Support/Captures, each with media, a thumbnail, and JSON metadata. Save to Photos is explicit and retries retain the local copy. Local deletion does not delete assets already in Photos.
 
 After installing an update, run `docs/DEVICE-TESTS.md` on the actual iPhone 6/iOS 12 device, including edge-to-edge framing comparisons, audio sync, all orientations, pre-roll, Live Photo import and interruption behavior.
+
+## Version 1.6 Live Photo verification
+
+Select LIVE, enable Mirror On for mirrored front-camera capture and wait for LIVE ready. After capture, open Library and hold the photo to animate. Save to Photos checks that the resulting asset has `photoLive`; only a passed check shows **LIVE verified in Photos**. **LIVE details** inspects the JPEG/MOV, repeats saved-asset verification and shares a bounded diagnostic log. The still remains VGA to match the buffered movie. All existing ordinary Photo/HDR/Video and import/flip controls remain available. See `docs/LIVE-PHOTOS.md` before reporting Photos or Instagram compatibility.
 
 ## Version 1.5 existing-photo flip
 
@@ -150,11 +152,9 @@ On the front camera, tap **Mirror On** to switch to **Mirror Off**. The live pre
 
 Install the new IPA over MirrorCam through Sideloadly using the same Apple ID and bundle ID. Save important captures to Photos first; avoid uninstalling if you want to keep the local library. Tap **4:3 · Max** to open Photo Size and Zoom Adjustment, use the zoom slider or pinch, and tap the zoom number to reset to 1× (the widest hardware view). Select **LIVE**, wait for **LIVE ready**, capture, open Library, then touch and hold the image. **Save to Photos** imports one Live Photo; **Save photo + video** is the explicit compatibility fallback.
 
-## Version 1.2 Iris12 experiment
+## Version 1.2 historical experiment
 
-In **LIVE**, tap **4:3 · Max** → **Try Iris12 native capture (iOS 12)**. The setting lasts for this launch. **LIVE capture status** reports installed hooks, native configuration acceptance, or the last rejection. An accepted configuration does not prove a successful capture; take a photo, open Library, touch and hold, then save to Photos and verify playback there. Try both cameras. Native capture preserves Apple's original JPEG/MOV and uses 4:3 at maximum resolution; aspect and size choices remain available in software mode. Zoom remains adjustable.
-
-On a reported exception, capture error, session error or ten-second timeout, MirrorCam restores the original capability methods and returns to software LIVE. Wait for **LIVE ready** and take a new capture. Tap **Turn Iris12 experiment off** to use software explicitly. If the app exits unexpectedly, reopen it; the experiment starts off. This app-only implementation does not enable Live Photos in Apple's Camera app. Native output mirroring, framing, audio and runtime stability require iPhone 6 testing.
+The Iris12 capability experiment from version 1.2 was removed in 1.6. The historical binary study remains in `docs/IRIS12-ANALYSIS.md`; the current app uses public APIs only.
 
 ## Version 1.3 HDR and layout
 
