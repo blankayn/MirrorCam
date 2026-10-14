@@ -223,6 +223,7 @@ final class MediaDetailViewController: UIViewController {
         info.text = flipped ? "Create a flipped still-photo copy, then Save to Photos.\nOriginal stays unchanged. JPEG copies are up to 2048 pixels."
             : (item.kind == .livePhoto ? "Touch and hold the photo to animate it.\nSave to Photos imports one Live Photo."
                : "Captures stay in MirrorCam until you delete them.")
+        if !flipped { updatePhotosLabel() }
     }
     @objc private func createFlippedCopy() {
         guard flipped, !editingPhoto, let url = item.photoURL else { return }

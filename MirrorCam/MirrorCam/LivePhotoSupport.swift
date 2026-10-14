@@ -135,9 +135,15 @@ enum LivePhotoDiagnostics {
     static func record(_ stage: String, _ message: String) {
         NSLog("[MirrorCam LIVE] %@: %@", stage, message)
         queue.async {
-            let line = "\(formatter.string(from: Date())) [\(stage)] \(message.replacingOccurrences(of: "\n", with: " | "))\n"
+            let content = String(message.replacingOccurrences(of: "\n", with: " | ").prefix(4000))
+            let line = "\(formatter.string(from: Date())) [\(stage)] \(content)\n"
             var existing = (try? Data(contentsOf: logURL)) ?? Data()
-            if existing.count > 64 * 1024 { existing = Data(existing.suffix(32 * 1024)) }
+            if existing.count > 64 * 1024 {
+                existing = Data(existing.suffix(32 * 1024))
+                // Start at a whole line so rotation never cuts a UTF-8 character.
+                if let newline = existing.firstIndex(of: 10) { existing.removeSubrange(...newline) }
+                else { existing.removeAll() }
+            }
             existing.append(Data(line.utf8))
             do {
                 try FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
