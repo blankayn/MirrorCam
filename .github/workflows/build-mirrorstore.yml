@@ -17,6 +17,14 @@ jobs:
         with:
           xcode-version: '15.4'
 
+      - name: Install Rust toolchain and iOS target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Install bindgen for minimuxer dependencies
+        run: cargo install --force --locked bindgen-cli
+
       - name: Install ldid
         run: brew install ldid wget
 
