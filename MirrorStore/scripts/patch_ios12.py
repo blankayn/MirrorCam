@@ -116,6 +116,31 @@ def patch_launch_controller(path: Path) -> None:
     path.write_text(source, encoding="utf-8", newline="")
 
 
+def patch_permission_icons(path: Path) -> None:
+    source = path.read_text(encoding="utf-8")
+    pattern = re.compile(r"(?ms)^    var icon: UIImage\? \{\n.*?^    \}")
+    match = pattern.search(source)
+    if match is None:
+        if "var icon: UIImage?" in source and "if #available(iOS 13.0, *)" in source:
+            return
+        raise SystemExit("Could not find the App Store permission SF Symbol property to backport.")
+    block = match.group(0)
+    if "if #available(iOS 13.0, *)" in block:
+        return
+    guarded = block.replace(
+        "    var icon: UIImage? {\n        switch self",
+        "    var icon: UIImage? {\n        if #available(iOS 13.0, *) {\n            switch self",
+        1,
+    )
+    guarded = guarded.replace(
+        "        }\n    }",
+        "            }\n        } else {\n            return nil\n        }\n    }",
+        1,
+    )
+    source = source[:match.start()] + guarded + source[match.end():]
+    path.write_text(source, encoding="utf-8", newline="")
+
+
 def patch_analytics(path: Path) -> None:
     # Keep call sites source-compatible while disabling the upstream App Center event stream.
     replacement = '''// MirrorStore does not send install or usage analytics.
@@ -211,6 +236,9 @@ def verify_clean_patch(root: Path) -> None:
     info = plistlib.loads(require_file(root, "AltStore/Info.plist").read_bytes())
     if "UniformTypeIdentifiers" in launch or "UTType." in launch or "forOpeningContentTypes" in launch:
         raise SystemExit("iOS 14 document-picker APIs remain in LaunchViewController.swift.")
+    permissions = require_file(root, "AltStoreCore/Model/AppPermission.swift").read_text(encoding="utf-8")
+    if "if #available(iOS 13.0, *)" not in permissions:
+        raise SystemExit("AppPermission SF Symbols are not guarded for iOS 12.")
     if "Original JSON:" in anisette or "Anisette used:" in anisette:
         raise SystemExit("Anisette secrets are still logged.")
     if info.get("ALTDeviceID") != "DEVICE-ID-SET-DURING-IPA-PREPARATION":
@@ -244,6 +272,7 @@ def main() -> None:
     clear_free_account_entitlements(require_file(root, "AltStore/AltStore.entitlements"))
     clear_free_account_entitlements(require_file(root, "AltStore/Resources/ReleaseEntitlements.plist"))
     patch_launch_controller(require_file(root, "AltStore/LaunchViewController.swift"))
+    patch_permission_icons(require_file(root, "AltStoreCore/Model/AppPermission.swift"))
     patch_analytics(require_file(root, "AltStore/Analytics/AnalyticsManager.swift"))
     redact_anisette_logs(require_file(root, "AltStore/Operations/FetchAnisetteDataOperation.swift"))
     patch_branding(root)
