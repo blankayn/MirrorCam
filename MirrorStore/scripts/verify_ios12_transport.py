@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject downloaded device transport archives that declare iOS > 12.2."""
+"""Reject source-built device transport archives that declare iOS > 12.2."""
 
 from __future__ import annotations
 
@@ -44,11 +44,13 @@ def main() -> None:
         raise SystemExit("Transport minimum-version inspection requires macOS Xcode command-line tools.")
 
     archives = [
-        path for path in args.dependencies.rglob("*.a")
-        if "sim" not in path.stem.lower() and path.is_file()
+        args.dependencies / "minimuxer" / "libminimuxer-ios.a",
+        args.dependencies / "em_proxy" / "libem_proxy-ios.a",
+        args.dependencies / "em_proxy" / "libem_proxy.a",
     ]
-    if not archives:
-        raise SystemExit("No device static libraries were found; cannot verify transport compatibility.")
+    missing = [path for path in archives if not path.is_file()]
+    if missing:
+        raise SystemExit("Required source-built transport archive is missing: " + ", ".join(map(str, missing)))
 
     failures: list[str] = []
     for archive in sorted(archives):

@@ -21,7 +21,7 @@ If you have access to a Mac, install Xcode, command-line tools, Git, Python 3, R
 MirrorStore/scripts/build_unsigned.sh
 ```
 
-The script checks out the exact SideStore source commit used as the base, initializes its pinned Git submodules, applies the iOS 12.2 patch, builds the `minimuxer` and `em_proxy` transport libraries from pinned source revisions, then runs the upstream packaging steps. It checks the static libraries' actual deployment metadata and stops if any device library requires newer than iOS 12.2. This metadata check does not prove runtime compatibility; the resulting app still needs testing on an iPhone 6.
+The script checks out the exact SideStore source commit used as the base, initializes its pinned Git submodules, applies the iOS 12.2 patch, builds the `minimuxer` and `em_proxy` transport libraries from pinned source revisions, then runs the upstream packaging steps. It checks the actual deployment metadata in both transport archives and stops if either requires newer than iOS 12.2. This metadata check does not prove runtime compatibility; the resulting app still needs testing on an iPhone 6.
 
 Without a Mac, push the source to GitHub, then run **Actions → Build MirrorStore for iOS 12 → Run workflow**. Download the `MirrorStore-unsigned` artifact to Windows after the workflow succeeds. GitHub Actions builds on a macOS runner; it does not install the app on the phone.
 
