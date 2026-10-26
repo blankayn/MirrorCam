@@ -1,0 +1,30 @@
+name: Build MirrorStore for iOS 12
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Check out MirrorStore sources
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.4'
+
+      - name: Install ldid
+        run: brew install ldid wget
+
+      - name: Build unsigned IPA
+        run: bash MirrorStore/scripts/build_unsigned.sh
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MirrorStore-unsigned
+          path: MirrorStore/dist/MirrorStore-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 3
