@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-"$REPO_ROOT/MirrorStore/scripts/bootstrap.sh"
+bash "$REPO_ROOT/MirrorStore/scripts/bootstrap.sh"
 SOURCE_DIR="$REPO_ROOT/MirrorStore/build/upstream"
 
 command -v xcodebuild >/dev/null || { echo "Xcode is required to compile the iOS app." >&2; exit 1; }
