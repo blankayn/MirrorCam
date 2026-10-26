@@ -21,7 +21,7 @@ If you have access to a Mac, install Xcode, command-line tools, Git, Python 3, `
 MirrorStore/scripts/build_unsigned.sh
 ```
 
-The script checks out the exact SideStore source commit used as the base, initializes its pinned Git submodules, applies the iOS 12.2 patch, and runs the upstream build and packaging steps. The upstream project fetches Rust prebuilt transport artifacts during Xcode builds. The script checks their declared minimum OS version and stops if a device library requires newer than iOS 12.2. This metadata check does not prove runtime compatibility; pin and rebuild the transport artifacts before relying on a distributable release.
+The script checks out the exact SideStore source commit used as the base, initializes its pinned Git submodules, applies the iOS 12.2 patch, and runs the upstream build and packaging steps. The upstream project's old fetch script requests artifacts by filenames that disappeared from the current `latest` releases. This patch fetches the legacy filenames from the dependency repositories' `build` release tags, then checks the declared minimum OS version and stops if a device library requires newer than iOS 12.2. Those release tags can move, and a metadata check does not prove runtime compatibility; pin and rebuild the transport artifacts before relying on a distributable release.
 
 Without a Mac, push the source to GitHub, then run **Actions → Build MirrorStore for iOS 12 → Run workflow**. Download the `MirrorStore-unsigned` artifact to Windows. That workflow is included in this repository but has not been run yet.
 

@@ -195,6 +195,16 @@ def patch_branding(root: Path) -> None:
         set_text(path, update_storyboard)
 
 
+def patch_transport_fetcher(root: Path) -> None:
+    fetcher = require_file(root, "Dependencies/fetch-prebuilt.sh")
+    def pin_legacy_asset_route(source: str) -> str:
+        source = source.replace("/releases/latest/download/", "/releases/download/build/")
+        if "/releases/download/build/" not in source:
+            raise SystemExit("Could not route legacy transport binary downloads to the build release tag.")
+        return source
+    set_text(fetcher, pin_legacy_asset_route)
+
+
 def verify_clean_patch(root: Path) -> None:
     launch = require_file(root, "AltStore/LaunchViewController.swift").read_text(encoding="utf-8")
     anisette = require_file(root, "AltStore/Operations/FetchAnisetteDataOperation.swift").read_text(encoding="utf-8")
@@ -212,6 +222,9 @@ def verify_clean_patch(root: Path) -> None:
         raise SystemExit("MirrorStore bundle identifier was not applied to the app build settings.")
     if "PRODUCT_BUNDLE_IDENTIFIER[config=Debug] = $(ORG_PREFIX).MirrorStore.$(DEVELOPMENT_TEAM)" not in build:
         raise SystemExit("MirrorStore debug bundle identifier was not applied to the app build settings.")
+    fetcher = require_file(root, "Dependencies/fetch-prebuilt.sh").read_text(encoding="utf-8")
+    if "/releases/latest/download/" in fetcher or "/releases/download/build/" not in fetcher:
+        raise SystemExit("Legacy transport assets are not being fetched from the expected build release route.")
 
 
 def main() -> None:
@@ -234,6 +247,7 @@ def main() -> None:
     patch_analytics(require_file(root, "AltStore/Analytics/AnalyticsManager.swift"))
     redact_anisette_logs(require_file(root, "AltStore/Operations/FetchAnisetteDataOperation.swift"))
     patch_branding(root)
+    patch_transport_fetcher(root)
     verify_clean_patch(root)
     print("MirrorStore compatibility patch applied and static checks passed.")
     print("This is not an Xcode build or an iPhone test.")
