@@ -96,6 +96,7 @@ def patch_launch_controller(path: Path) -> None:
         raise SystemExit("Could not find the iOS 14 pairing-file picker code to backport.")
     old_path = 'let documentsPath = fm.documentsDirectory.appendingPathComponent("/\\(filename)")'
     source = source.replace(old_path, 'let documentsPath = fm.documentsDirectory.appendingPathComponent(filename)')
+    source = source.replace("                documentPickerController.shouldShowFileExtensions = true\n", "")
     old_info_pair = '''        } else if let plistString = Bundle.main.object(forInfoDictionaryKey: "ALTPairingFile") as? String, !plistString.isEmpty, !plistString.contains("insert pairing file here"){
             print("Loaded ALTPairingFile from Info.plist")
             return plistString'''
@@ -139,6 +140,71 @@ def patch_permission_icons(path: Path) -> None:
     )
     source = source[:match.start()] + guarded + source[match.end():]
     path.write_text(source, encoding="utf-8", newline="")
+
+
+def replace_compatibility_code(path: Path, old: str, new: str, label: str) -> None:
+    source = path.read_text(encoding="utf-8")
+    if old in source:
+        source = source.replace(old, new, 1)
+    elif new not in source:
+        raise SystemExit(f"Could not find expected iOS 12 compatibility patch point: {label}.")
+    path.write_text(source, encoding="utf-8", newline="")
+
+
+def patch_ios12_api_calls(root: Path) -> None:
+    # UIKit values and URLResponse conveniences introduced in iOS 13.
+    old_response = '''            if let response = response,
+               let version = response.value(forHTTPHeaderField: "Implementation-Version") {
+                print("Implementation-Version: \\(version)")
+            } else { print("No Implementation-Version header") }'''
+    new_response = '''            let versionHeader = response?.allHeaderFields.first { header in
+                String(describing: header.key).caseInsensitiveCompare("Implementation-Version") == .orderedSame
+            }
+            if let version = versionHeader?.value as? String {
+                print("Implementation-Version: \\(version)")
+            } else { print("No Implementation-Version header") }'''
+    replace_compatibility_code(
+        require_file(root, "AltStore/Operations/FetchAnisetteDataOperation.swift"),
+        old_response,
+        new_response,
+        "HTTP response header lookup",
+    )
+
+    old_error_case = '''        case .ProfileRemove:
+            return NSLocalizedString("Unable to manage profiles on the device", comment: "")
+        }'''
+    new_error_case = '''        case .ProfileRemove:
+            return NSLocalizedString("Unable to manage profiles on the device", comment: "")
+        default:
+            return NSLocalizedString("The device operation failed.", comment: "")
+        }'''
+    replace_compatibility_code(
+        require_file(root, "AltStore/Operations/OperationError.swift"),
+        old_error_case,
+        new_error_case,
+        "MinimuxerError fallback",
+    )
+
+    styles = {
+        "AltStore/Browse/BrowseViewController.swift": "cell.bannerView.button.activityIndicatorView.style",
+        "AltStore/Authentication/AuthenticationViewController.swift": "self.signInButton.activityIndicatorView.style",
+        "AltStore/Components/PillButton.swift": "self.activityIndicatorView.style",
+        "AltStore/Settings/PatreonComponents.swift": "self.button.activityIndicatorView.style",
+    }
+    for relative, expression in styles.items():
+        replace_compatibility_code(
+            require_file(root, relative),
+            f"{expression} = .medium",
+            f"{expression} = .gray",
+            f"{relative} activity indicator style",
+        )
+
+    replace_compatibility_code(
+        require_file(root, "AltStore/App Detail/AppContentViewController.swift"),
+        "cell.button.tintColor = .label",
+        "cell.button.tintColor = .darkGray",
+        "dynamic label color",
+    )
 
 
 def patch_analytics(path: Path) -> None:
@@ -236,11 +302,29 @@ def verify_clean_patch(root: Path) -> None:
     info = plistlib.loads(require_file(root, "AltStore/Info.plist").read_bytes())
     if "UniformTypeIdentifiers" in launch or "UTType." in launch or "forOpeningContentTypes" in launch:
         raise SystemExit("iOS 14 document-picker APIs remain in LaunchViewController.swift.")
+    if "shouldShowFileExtensions" in launch:
+        raise SystemExit("iOS 13 document-picker APIs remain in LaunchViewController.swift.")
     permissions = require_file(root, "AltStoreCore/Model/AppPermission.swift").read_text(encoding="utf-8")
     if "if #available(iOS 13.0, *)" not in permissions:
         raise SystemExit("AppPermission SF Symbols are not guarded for iOS 12.")
     if "Original JSON:" in anisette or "Anisette used:" in anisette:
         raise SystemExit("Anisette secrets are still logged.")
+    if 'value(forHTTPHeaderField: "Implementation-Version")' in anisette:
+        raise SystemExit("An iOS 13 URLResponse API remains in FetchAnisetteDataOperation.swift.")
+    operation_error = require_file(root, "AltStore/Operations/OperationError.swift").read_text(encoding="utf-8")
+    if 'case .ProfileRemove:' not in operation_error or 'The device operation failed.' not in operation_error:
+        raise SystemExit("MinimuxerError does not have the iOS 12-safe fallback case.")
+    for relative in (
+        "AltStore/Browse/BrowseViewController.swift",
+        "AltStore/Authentication/AuthenticationViewController.swift",
+        "AltStore/Components/PillButton.swift",
+        "AltStore/Settings/PatreonComponents.swift",
+    ):
+        if ".activityIndicatorView.style = .medium" in require_file(root, relative).read_text(encoding="utf-8"):
+            raise SystemExit(f"An iOS 13 activity-indicator style remains in {relative}.")
+    app_content = require_file(root, "AltStore/App Detail/AppContentViewController.swift").read_text(encoding="utf-8")
+    if "cell.button.tintColor = .label" in app_content:
+        raise SystemExit("An iOS 13 dynamic color remains in AppContentViewController.swift.")
     if info.get("ALTDeviceID") != "DEVICE-ID-SET-DURING-IPA-PREPARATION":
         raise SystemExit("MirrorStore Info.plist does not contain the pairing setup placeholder.")
     if info.get("ALTAnisetteURL") != "https://ani.sidestore.io":
@@ -273,6 +357,7 @@ def main() -> None:
     clear_free_account_entitlements(require_file(root, "AltStore/Resources/ReleaseEntitlements.plist"))
     patch_launch_controller(require_file(root, "AltStore/LaunchViewController.swift"))
     patch_permission_icons(require_file(root, "AltStoreCore/Model/AppPermission.swift"))
+    patch_ios12_api_calls(root)
     patch_analytics(require_file(root, "AltStore/Analytics/AnalyticsManager.swift"))
     redact_anisette_logs(require_file(root, "AltStore/Operations/FetchAnisetteDataOperation.swift"))
     patch_branding(root)
