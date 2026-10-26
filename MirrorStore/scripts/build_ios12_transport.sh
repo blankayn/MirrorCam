@@ -44,6 +44,7 @@ IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 cd "$EM_PROXY_SOURCE"
 BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$IOS_SDK" IPHONEOS_DEPLOYMENT_TARGET=12.2 cargo build --release --target aarch64-apple-ios
 cp target/aarch64-apple-ios/release/libem_proxy.a "$DEPENDENCIES/em_proxy/libem_proxy-ios.a"
+cp target/aarch64-apple-ios/release/libem_proxy.a "$DEPENDENCIES/em_proxy/libem_proxy.a"
 cp include/EMProxy/em_proxy.h "$DEPENDENCIES/em_proxy/em_proxy.h"
 
 # The Xcode subprojects otherwise replace these source-built archives with
